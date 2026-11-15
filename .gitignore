@@ -1,0 +1,26 @@
+# Generated Unreal files
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+*.log
+
+# Local editor and agent settings
+/.codex/
+/.cursor/
+/.gemini/
+/.mcp.json
+/.vscode/
+.idea/
+.vs/
+
+# Generated IDE projects and OS files
+*.sln
+*.suo
+*.vcxproj.user
+Thumbs.db
+.DS_Store
+
+# Local project resources and notes
+/ProjectResources/
+*.[mM][dD]
