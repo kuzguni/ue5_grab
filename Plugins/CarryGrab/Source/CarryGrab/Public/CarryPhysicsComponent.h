@@ -62,6 +62,10 @@ private:
 
     void SetContactTracking(UPrimitiveComponent* Body);
     FVector LimitContactTarget(const FVector& Target, const FVector& GripPoint, double AllowedError) const;
+    void UpdateHeavyApproach(UPrimitiveComponent& Body, const UCarryableComponent& Item,
+        const FVector& DriveError, double Now);
+    FVector LimitApproachTarget(const FVector& Target, const FVector& GripPoint,
+        const FVector& BodyLocation, double AllowedError, double Now) const;
 
     UFUNCTION()
     void OnHeldBodyHit(UPrimitiveComponent* HitComponent, AActor* OtherActor,
@@ -69,6 +73,12 @@ private:
 
     TWeakObjectPtr<UPrimitiveComponent> TrackedContactBody;
     TArray<FHeavyContact, TInlineAllocator<4>> HeavyContacts;
+    TWeakObjectPtr<UPrimitiveComponent> ApproachBody;
+    FVector ApproachNormal = FVector::ZeroVector;
+    FVector ApproachStopOffset = FVector::ZeroVector;
+    double ApproachMass = 0.0;
+    double LastApproachTime = 0.0;
+    double NextApproachQuery = 0.0;
     double TrackedBodyMass = 0.0;
     bool bEnabledHitNotifications = false;
 

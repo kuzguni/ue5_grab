@@ -5,6 +5,7 @@
 
 #include "CarryableComponent.h"
 #include "CarryView.h"
+#include "CollisionQueryParams.h"
 #include "Components/PrimitiveComponent.h"
 #include "Engine/HitResult.h"
 #include "Engine/World.h"
@@ -38,10 +39,18 @@ namespace
     constexpr double FullLimitMassRatio = 4.0;
     constexpr double HeavyContactAcceleration = 4.0; // m/s² of additional lateral spring force into contact
     constexpr int32 MaxHeavyContacts = 4;
+    constexpr double ApproachQueryInterval = 0.05;
+    constexpr double ApproachExpiry = 0.12;
+    constexpr double ApproachDistance = 90.0;
+    constexpr double ApproachDriveThreshold = 16.0;
+    constexpr double ApproachErrorFraction = 0.15;
 
     TAutoConsoleVariable<int32> CVarLimitHeavyContactPush(
         TEXT("carry.LimitHeavyContactPush"), 1,
         TEXT("Limit a held prop's sideways drive into much heavier movable carryables. 0: off, 1: on."));
+    TAutoConsoleVariable<int32> CVarBrakeHeavyApproach(
+        TEXT("carry.BrakeHeavyApproach"), 1,
+        TEXT("Brake fast held props approaching a much heavier movable carryable. 0: off, 1: on."));
 }
 
 UCarryPhysicsComponent::UCarryPhysicsComponent()
@@ -85,6 +94,8 @@ void UCarryPhysicsComponent::SetContactTracking(UPrimitiveComponent* Body)
     }
     TrackedContactBody = Body;
     HeavyContacts.Reset();
+    ApproachBody.Reset();
+    NextApproachQuery = 0.0;
     bEnabledHitNotifications = false;
     if (Body)
     {
@@ -158,6 +169,69 @@ FVector UCarryPhysicsComponent::LimitContactTarget(const FVector& Target, const 
         }
     }
     return GripPoint + Error;
+}
+
+void UCarryPhysicsComponent::UpdateHeavyApproach(UPrimitiveComponent& Body, const UCarryableComponent& Item,
+    const FVector& DriveError, double Now)
+{
+    if (Now < NextApproachQuery || DriveError.SizeSquared2D() < FMath::Square(ApproachDriveThreshold))
+    {
+        return;
+    }
+    NextApproachQuery = Now + ApproachQueryInterval;
+    CSV_SCOPED_TIMING_STAT(CarryContacts, SweepHeavyApproach);
+
+    FComponentQueryParams Query(SCENE_QUERY_STAT(CarryHeavyApproach), GetOwner());
+    Query.bFindInitialOverlaps = false;
+    for (const FCarryGrip& Grip : Item.Grips)
+    {
+        Query.AddIgnoredActor(Grip.Holder.Get());
+    }
+    const FVector Start = Body.GetComponentLocation();
+    const FVector Direction = DriveError.GetSafeNormal2D();
+    TArray<FHitResult> Hits;
+    GetWorld()->ComponentSweepMulti(Hits, &Body, Start, Start + Direction * ApproachDistance, Body.GetComponentQuat(), Query);
+    for (const FHitResult& Hit : Hits)
+    {
+        UPrimitiveComponent* Other = Hit.GetComponent();
+        const FVector Normal = Hit.ImpactNormal.GetSafeNormal2D();
+        if (!Hit.bBlockingHit || Hit.bStartPenetrating || FMath::Abs(Hit.ImpactNormal.Z) > 0.5
+            || FVector::DotProduct(Normal, Direction) >= -0.2 || !IsValid(Other) || !Other->IsSimulatingPhysics(Hit.BoneName))
+        {
+            continue;
+        }
+
+        const double OtherMass = Other->GetMass();
+        if (OtherMass <= TrackedBodyMass * MinMassRatio || !Other->GetOwner()->FindComponentByClass<UCarryableComponent>())
+        {
+            continue;
+        }
+        ApproachBody = Other;
+        ApproachNormal = Normal;
+        ApproachStopOffset = Hit.Location - Other->GetComponentLocation();
+        ApproachMass = OtherMass;
+        LastApproachTime = Now;
+        break;
+    }
+}
+
+FVector UCarryPhysicsComponent::LimitApproachTarget(const FVector& Target, const FVector& GripPoint,
+    const FVector& BodyLocation, double AllowedError, double Now) const
+{
+    const UPrimitiveComponent* Other = ApproachBody.Get();
+    if (!Other || Now - LastApproachTime > ApproachExpiry)
+    {
+        return Target;
+    }
+    const double Gap = FVector::DotProduct(BodyLocation - Other->GetComponentLocation() - ApproachStopOffset, ApproachNormal);
+    const double InwardError = -FVector::DotProduct(Target - GripPoint, ApproachNormal);
+    const double SafeError = FMath::Max(AllowedError, ApproachErrorFraction * Gap);
+    if (InwardError <= SafeError)
+    {
+        return Target;
+    }
+    const double Limit = FMath::SmoothStep(MinMassRatio, FullLimitMassRatio, ApproachMass / TrackedBodyMass);
+    return Target + ApproachNormal * (InwardError - SafeError) * Limit;
 }
 
 void UCarryPhysicsComponent::ReleaseGripConstraint(FActiveGripConstraint& Entry)
@@ -796,12 +870,22 @@ void UCarryPhysicsComponent::TickComponent(float DeltaTime, ELevelTick TickType,
                 const double HoldTorque = Grip.SwingHoldAlpha * AngularTorqueCapChaos * AngularOrientScale;
                 const bool bHoldTilt = HoldTorque > UE_SMALL_NUMBER;
                 FTransform JointTarget = KinematicTarget;
-                if (!HeavyContacts.IsEmpty())
+                if (TrackedContactBody.IsValid())
                 {
                     // Keep the camera target intact. Limit only the endpoint that drives the
                     // joint, and only along the horizontal normal toward a heavy contact.
                     const double AllowedError = HeavyContactAcceleration * CentimetersPerMeter * MassPerHolder / LinearStiffnessChaos;
-                    JointTarget.SetLocation(LimitContactTarget(KinematicTarget.GetLocation(), BodyContact, AllowedError));
+                    if (!HeavyContacts.IsEmpty())
+                    {
+                        JointTarget.SetLocation(LimitContactTarget(JointTarget.GetLocation(), BodyContact, AllowedError));
+                    }
+                    else if (CVarBrakeHeavyApproach.GetValueOnGameThread() != 0)
+                    {
+                        const double Now = Owner->GetWorld()->GetTimeSeconds();
+                        UpdateHeavyApproach(*Body, *Item, KinematicTarget.GetLocation() - BodyContact, Now);
+                        JointTarget.SetLocation(LimitApproachTarget(JointTarget.GetLocation(), BodyContact,
+                            BodyTransform.GetLocation(), AllowedError, Now));
+                    }
                 }
                 if (bHoldTilt)
                 {
