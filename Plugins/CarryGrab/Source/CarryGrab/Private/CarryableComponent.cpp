@@ -5,18 +5,131 @@
 #include "CarryProfileBinding.h"
 #include "CarryProfileSettings.h"
 #include "CarryView.h"
+#include "CollisionQueryParams.h"
+#include "CollisionShape.h"
+#include "Components/CapsuleComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/HitResult.h"
+#include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerState.h"
 #include "HAL/IConsoleManager.h"
 #include "Net/UnrealNetwork.h"
 #include "PhysicalMaterials/PhysicalMaterial.h"
+#include "PlayerCarryComponent.h"
 
 namespace
 {
+    struct FGripReach
+    {
+        FVector Start = FVector::ZeroVector;
+        FVector Bend = FVector::ZeroVector;
+        FVector End = FVector::ZeroVector;
+        float Radius = 0.0f;
+        int32 BlockedLeg = 0;
+
+        bool CanReach() const { return Radius > 0.0f && BlockedLeg == 0; }
+    };
+
+    FGripReach EvaluateGripReach(UWorld& World, const APawn& Holder, const UPrimitiveComponent& Body,
+        const FVector& Contact, const FVector& Normal)
+    {
+        static const FCarryPlayerSettings Defaults;
+        const UPlayerCarryComponent* PlayerCarry = Holder.FindComponentByClass<UPlayerCarryComponent>();
+        const FCarryPlayerSettings* Profile = PlayerCarry ? PlayerCarry->GetProfileSettings() : nullptr;
+        const FCarryPlayerSettings& Settings = Profile ? *Profile : Defaults;
+        const UPlayerCarryComponent* ProbeSettings = PlayerCarry ? PlayerCarry : GetDefault<UPlayerCarryComponent>();
+
+        const UCapsuleComponent* Capsule = Cast<UCapsuleComponent>(Holder.GetRootComponent());
+        const FVector Center = Capsule ? Capsule->GetComponentLocation() : Holder.GetActorLocation();
+        FGripReach Reach;
+        Reach.Start = Center + FVector::UpVector * Settings.ElbowHeightOffset;
+        const FVector ToContact = Contact - Reach.Start;
+        const double Distance = ToContact.Size();
+        if (Distance > FMath::Max(1.0f, Settings.HandReachDistance))
+        {
+            return Reach;
+        }
+
+        Reach.Radius = FMath::Max(1.0f, ProbeSettings->GetHandSweepRadius());
+        const double Clearance = Reach.Radius + 0.25;
+        const FVector Forward = ToContact.GetSafeNormal2D(
+            UE_SMALL_NUMBER, Holder.GetActorForwardVector().GetSafeNormal2D());
+        const double Rise = FMath::DegreesToRadians(FMath::Clamp<double>(Settings.ProbeRiseDegrees, 0.0, 89.0));
+        const FVector FirstDirection = Forward * FMath::Cos(Rise) + FVector::UpVector * FMath::Sin(Rise);
+        double FirstLength = FMath::Min<double>(FMath::Max(1.0f, ProbeSettings->GetProbeFirstLength()), 0.75 * Distance);
+
+        const double OriginGap = FVector::DotProduct(Reach.Start - Contact, Normal);
+        const double GapChange = FVector::DotProduct(FirstDirection, Normal);
+        if (Normal.Z <= -0.6 && OriginGap > Clearance && GapChange < -UE_SMALL_NUMBER)
+        {
+            // Keep the bend below an underside surface when approaching it from below.
+            FirstLength = FMath::Min(FirstLength, (OriginGap - Clearance) / -GapChange);
+        }
+
+        Reach.Bend = Reach.Start + FirstDirection * FirstLength;
+        // Stop the sphere center outside the face so its surface approaches the intended contact.
+        Reach.End = Contact + Normal * Clearance;
+        const FCollisionQueryParams Query(SCENE_QUERY_STAT(CarryBentReach), false, &Holder);
+        const FCollisionShape Shape = FCollisionShape::MakeSphere(Reach.Radius);
+        FHitResult Hit;
+        if (World.SweepSingleByChannel(Hit, Reach.Start, Reach.Bend, FQuat::Identity, ECC_Visibility, Shape, Query))
+        {
+            Reach.End = Hit.Location;
+            Reach.BlockedLeg = 1;
+            return Reach;
+        }
+
+        if (World.SweepSingleByChannel(Hit, Reach.Bend, Reach.End, FQuat::Identity, ECC_Visibility, Shape, Query))
+        {
+            Reach.End = Hit.Location;
+            const bool bReachedGrip = !Hit.bStartPenetrating && Hit.GetComponent() == &Body
+                && FVector::DistSquared(Hit.ImpactPoint, Contact) <= FMath::Square(2.0 * Reach.Radius + 1.0);
+            Reach.BlockedLeg = bReachedGrip ? 0 : 2;
+        }
+        return Reach;
+    }
+
+#if ENABLE_DRAW_DEBUG
+    void DrawReachSweep(const UWorld& World, const FVector& Start, const FVector& End, float Radius, const FColor& Color)
+    {
+        const FVector Segment = End - Start;
+        const double Length = Segment.Size();
+        if (Length <= UE_KINDA_SMALL_NUMBER)
+        {
+            DrawDebugSphere(&World, Start, Radius, 12, Color, false, -1.0f, 0, 1.0f);
+            return;
+        }
+
+        const FQuat Rotation = FQuat::FindBetweenNormals(FVector::UpVector, Segment / Length);
+        DrawDebugCapsule(&World, Start + Segment * 0.5, static_cast<float>(Length * 0.5) + Radius, Radius,
+            Rotation, Color, false, -1.0f, 0, 0.0f);
+    }
+
+    void DrawBentReachPath(const UWorld& World, const FGripReach& Reach, const FVector& Contact)
+    {
+        if (Reach.Radius <= 0.0f)
+        {
+            DrawDebugPoint(&World, Contact, 8.0f, FColor::Red, false, -1.0f);
+            return;
+        }
+
+        const bool bFirstBlocked = Reach.BlockedLeg == 1;
+        DrawReachSweep(World, Reach.Start, bFirstBlocked ? Reach.End : Reach.Bend, Reach.Radius,
+            bFirstBlocked ? FColor::Red : FColor(80, 170, 255));
+        if (!bFirstBlocked)
+        {
+            DrawDebugPoint(&World, Reach.Bend, 7.0f, FColor::White, false, -1.0f);
+            DrawReachSweep(World, Reach.Bend, Reach.End, Reach.Radius,
+                Reach.BlockedLeg == 2 ? FColor::Red : FColor::Magenta);
+        }
+        DrawDebugPoint(&World, Reach.CanReach() ? Contact : Reach.End, 8.0f,
+            Reach.CanReach() ? FColor::Green : FColor::Red, false, -1.0f);
+    }
+#endif
+
     void ApplyPredictiveInterpolationCVars()
     {
         static bool bCVarsApplied = false;
@@ -139,6 +252,11 @@ bool UCarryableComponent::TryAddGrip(APawn& Holder, const FHitResult& Hit)
         return false;
     }
 
+    if (!EvaluateGripReach(*Item->GetWorld(), Holder, *Body, Hit.ImpactPoint, Hit.ImpactNormal).CanReach())
+    {
+        return false;
+    }
+
     Item->FlushNetDormancy();
     Body->WakeAllRigidBodies();
     const FTransform& BodyTransform = Body->GetComponentTransform();
@@ -250,7 +368,7 @@ void UCarryableComponent::OnRep_Grips()
     {
         Body->WakeAllRigidBodies();
     }
-    SetComponentTickEnabled(bShowGripMarkers && bIsHeld && GetNetMode() != NM_DedicatedServer);
+    SetComponentTickEnabled((bShowGripMarkers || bShowBentReachPreview) && bIsHeld && GetNetMode() != NM_DedicatedServer);
     if (UCarryCollisionComponent* Collision = CachedCollision ? CachedCollision.Get() : (GetOwner() ? GetOwner()->FindComponentByClass<UCarryCollisionComponent>() : nullptr))
     {
         Collision->UpdateHolders(Grips);
@@ -284,6 +402,17 @@ void UCarryableComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
     {
         const FVector Contact = BodyTransform.TransformPosition(Grip.LocalPoint);
         const FVector Normal = BodyTransform.TransformVectorNoScale(Grip.LocalNormal).GetSafeNormal();
+#if ENABLE_DRAW_DEBUG
+        if (bShowBentReachPreview && IsValid(Grip.Holder.Get()))
+        {
+            const FGripReach Reach = EvaluateGripReach(*World, *Grip.Holder, *Body, Contact, Normal);
+            DrawBentReachPath(*World, Reach, Contact);
+        }
+#endif
+        if (!bShowGripMarkers)
+        {
+            continue;
+        }
         constexpr float MarkerRadius = 6.0f;
         const FVector Center = Contact + Normal * MarkerRadius;
 

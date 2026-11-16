@@ -115,6 +115,10 @@ private:
     UPROPERTY(EditAnywhere, Category = "Carry|Debug")
     bool bShowGripMarkers = true;
 
+    /** Draw the two center sweeps from elbow height to the held grab point. */
+    UPROPERTY(EditAnywhere, Category = "Carry|Debug")
+    bool bShowBentReachPreview = true;
+
     UPROPERTY(Transient)
     TObjectPtr<UPrimitiveComponent> CachedBody = nullptr;
 

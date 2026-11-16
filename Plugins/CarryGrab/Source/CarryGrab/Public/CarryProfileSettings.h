@@ -19,6 +19,15 @@ struct CARRYGRAB_API FCarryPlayerSettings
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reach", meta = (ClampMin = "0", Units = "s", ToolTip = "Seconds the grab point must stay outside held reach before this player lets go. Returning to range resets the countdown."))
     float ReleaseGrace = 0.25f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Reach Preview", meta = (ClampMin = "1", Units = "cm", ToolTip = "Maximum reach from the elbow-height origin for pickup. The separate held-distance grace still governs release."))
+    float HandReachDistance = 180.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Reach Preview|Bent Probe", meta = (Units = "cm", ToolTip = "Vertical offset of the first sweep's start from the capsule center. Use 0 to start at the center."))
+    float ElbowHeightOffset = 35.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Reach Preview|Bent Probe", meta = (ClampMin = "0", ClampMax = "89", ToolTip = "The first sweep's upward angle from horizontal. The second sweep aims at the selected grab point."))
+    float ProbeRiseDegrees = 70.0f;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Controls", meta = (ClampMin = "1", Units = "cm", ToolTip = "Distance the hold target moves per mouse wheel notch."))
     float HoldDistanceStep = 15.0f;
 

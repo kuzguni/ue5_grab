@@ -17,6 +17,8 @@ class CARRYGRAB_API UPlayerCarryComponent : public UActorComponent
 public:
     UPlayerCarryComponent();
     const FCarryPlayerSettings* GetProfileSettings() const;
+    float GetProbeFirstLength() const { return ProbeFirstLength; }
+    float GetHandSweepRadius() const { return HandSweepRadius; }
 
     UFUNCTION(BlueprintCallable, Category = "Carry")
     void RequestGrab();
@@ -58,6 +60,12 @@ private:
     /** Assign a Blueprint Player Carry Profile here. */
     UPROPERTY(EditAnywhere, Category = "Carry|Profile")
     TObjectPtr<UPrimaryDataAsset> PlayerProfile;
+
+    UPROPERTY(EditAnywhere, Category = "Carry|Reach Trace", meta = (ClampMin = "1", Units = "cm", ToolTip = "Maximum length of trace 1 from elbow height to the bend. It shortens for nearby grips or to stay below an underside grip."))
+    float ProbeFirstLength = 85.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Carry|Reach Trace", meta = (ClampMin = "1", Units = "cm", ToolTip = "Sphere radius used by both segments of the pickup trace."))
+    float HandSweepRadius = 2.0f;
 
     /** Pickup reach when no player profile is assigned. */
     UPROPERTY(EditDefaultsOnly, Category = "Carry", meta = (ClampMin = "1", Units = "cm", EditCondition = "PlayerProfile == nullptr", EditConditionHides))
