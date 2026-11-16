@@ -34,6 +34,8 @@ namespace
     constexpr double MovingAngularDampingScale = 0.55;
     constexpr double ReferenceAngularDampingScale = 1.25;
     constexpr double HeavyAngularDampingScale = 1.5;
+    constexpr double CompactDampingFullRadiusCm = 6.0;
+    constexpr double CompactDampingEndRadiusCm = 12.0;
     constexpr double ContactExpirySeconds = 0.09;
     constexpr double MinMassRatio = 2.0;
     constexpr double FullLimitMassRatio = 4.0;
@@ -530,8 +532,12 @@ void UCarryPhysicsComponent::TickComponent(float DeltaTime, ELevelTick TickType,
     const double ReferenceDampingScale = FMath::Lerp(DampingSwingScale, ReferenceDamping, TurnLoadAlpha);
     const double HeavyLoadAlpha = FMath::SmoothStep(ReferenceMass, 7.0 * ReferenceMass, MassPerHolder);
     const double AngularDampingScale = FMath::Lerp(ReferenceDampingScale, HeavyDamping, HeavyLoadAlpha);
+    // Small collision shapes gain more angular speed from a similar off-center acceleration.
+    const double CompactAlpha = 1.0 - FMath::SmoothStep(CompactDampingFullRadiusCm, CompactDampingEndRadiusCm, GyrationRadiusCm);
+    const double CompactDamping = FMath::Clamp<double>(Settings ? Settings->CompactSwingDampingScale : 3.0f, 1.0, 5.0);
     const double SettleRate = Settings ? Settings->AngularSettleRate : AngularSettleRate;
-    const double AngularDampingChaos = DriveDampingRatio * SettleRate * AngularDampingScale * AvgInertia;
+    const double AngularDampingChaos = DriveDampingRatio * SettleRate * AngularDampingScale * AvgInertia
+        * FMath::Lerp(1.0, CompactDamping, CompactAlpha);
 
     FPhysScene* Scene = BodyInstance->GetPhysicsScene();
     int32 ActiveHolders = 0;

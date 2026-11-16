@@ -112,6 +112,9 @@ struct CARRYGRAB_API FCarryItemSettings
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Swing", meta = (ClampMin = "0", ToolTip = "Angular damping multiplier at the Reference Follow Mass per holder. Higher values reduce swing near that load."))
     float ReferenceAngularDampingScale = 1.25f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Swing", meta = (ClampMin = "1", ClampMax = "5", ToolTip = "Extra held angular damping for compact props. The effect fades out as the body's rotational size increases. Set to 1 to disable it."))
+    float CompactSwingDampingScale = 3.0f;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Swing", meta = (ClampMin = "0", ToolTip = "Angular damping multiplier for very heavy loads, reached at seven times the Reference Follow Mass per holder."))
     float HeavyAngularDampingScale = 1.5f;
 };
