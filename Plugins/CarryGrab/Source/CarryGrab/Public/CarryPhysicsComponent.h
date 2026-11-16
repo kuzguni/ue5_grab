@@ -8,6 +8,7 @@
 class APawn;
 class UCarryableComponent;
 class UPrimitiveComponent;
+struct FHitResult;
 
 /** Drives each accepted holder's grip through a Chaos 6-DOF constraint on the authoritative rigid body. */
 UCLASS(ClassGroup = (Carry), meta = (BlueprintSpawnableComponent))
@@ -50,6 +51,26 @@ private:
     void PruneInactiveConstraints(const UCarryableComponent* Item);
     void ReleaseGripConstraint(FActiveGripConstraint& Entry);
     void ReleaseAllConstraints();
+
+    struct FHeavyContact
+    {
+        TWeakObjectPtr<UPrimitiveComponent> Body;
+        FVector OutwardNormal;
+        double OtherMass;
+        double LastHitTime;
+    };
+
+    void SetContactTracking(UPrimitiveComponent* Body);
+    FVector LimitContactTarget(const FVector& Target, const FVector& GripPoint, double AllowedError) const;
+
+    UFUNCTION()
+    void OnHeldBodyHit(UPrimitiveComponent* HitComponent, AActor* OtherActor,
+        UPrimitiveComponent* OtherComponent, FVector NormalImpulse, const FHitResult& Hit);
+
+    TWeakObjectPtr<UPrimitiveComponent> TrackedContactBody;
+    TArray<FHeavyContact, TInlineAllocator<4>> HeavyContacts;
+    double TrackedBodyMass = 0.0;
+    bool bEnabledHitNotifications = false;
 
     double PostReleaseReplicationTimer = 0.0;
 

@@ -6,14 +6,19 @@
 #include "CarryableComponent.h"
 #include "CarryView.h"
 #include "Components/PrimitiveComponent.h"
+#include "Engine/HitResult.h"
 #include "Engine/World.h"
+#include "HAL/IConsoleManager.h"
 #include "PhysicsEngine/BodyInstance.h"
+#include "ProfilingDebugging/CsvProfiler.h"
 #include "Chaos/ImplicitObject.h"
 #include "Chaos/PBDJointConstraintData.h"
 #include "Chaos/ShapeInstance.h"
 #include "Chaos/Sphere.h"
 #include "Physics/Experimental/PhysScene_Chaos.h"
 #include "PhysicsProxy/SingleParticlePhysicsProxy.h"
+
+CSV_DEFINE_CATEGORY(CarryContacts, false);
 
 namespace
 {
@@ -28,6 +33,15 @@ namespace
     constexpr double MovingAngularDampingScale = 0.55;
     constexpr double ReferenceAngularDampingScale = 1.25;
     constexpr double HeavyAngularDampingScale = 1.5;
+    constexpr double ContactExpirySeconds = 0.09;
+    constexpr double MinMassRatio = 2.0;
+    constexpr double FullLimitMassRatio = 4.0;
+    constexpr double HeavyContactAcceleration = 4.0; // m/s² of additional lateral spring force into contact
+    constexpr int32 MaxHeavyContacts = 4;
+
+    TAutoConsoleVariable<int32> CVarLimitHeavyContactPush(
+        TEXT("carry.LimitHeavyContactPush"), 1,
+        TEXT("Limit a held prop's sideways drive into much heavier movable carryables. 0: off, 1: on."));
 }
 
 UCarryPhysicsComponent::UCarryPhysicsComponent()
@@ -49,8 +63,101 @@ void UCarryPhysicsComponent::BeginPlay()
 
 void UCarryPhysicsComponent::OnUnregister()
 {
+    SetContactTracking(nullptr);
     ReleaseAllConstraints();
     Super::OnUnregister();
+}
+
+void UCarryPhysicsComponent::SetContactTracking(UPrimitiveComponent* Body)
+{
+    if (TrackedContactBody.Get() == Body && !TrackedContactBody.IsStale())
+    {
+        return;
+    }
+
+    if (UPrimitiveComponent* Previous = TrackedContactBody.Get())
+    {
+        Previous->OnComponentHit.RemoveDynamic(this, &UCarryPhysicsComponent::OnHeldBodyHit);
+        if (bEnabledHitNotifications)
+        {
+            Previous->SetNotifyRigidBodyCollision(false);
+        }
+    }
+    TrackedContactBody = Body;
+    HeavyContacts.Reset();
+    bEnabledHitNotifications = false;
+    if (Body)
+    {
+        const FBodyInstance* Instance = Body->GetBodyInstance();
+        bEnabledHitNotifications = Instance && !Instance->bNotifyRigidBodyCollision;
+        Body->OnComponentHit.AddUniqueDynamic(this, &UCarryPhysicsComponent::OnHeldBodyHit);
+        if (bEnabledHitNotifications)
+        {
+            Body->SetNotifyRigidBodyCollision(true);
+        }
+    }
+}
+
+void UCarryPhysicsComponent::OnHeldBodyHit(UPrimitiveComponent* HitComponent, AActor* OtherActor,
+    UPrimitiveComponent* OtherComponent, FVector NormalImpulse, const FHitResult& Hit)
+{
+    CSV_SCOPED_TIMING_STAT(CarryContacts, OnHeldBodyHit);
+    const FVector Normal = Hit.ImpactNormal.GetSafeNormal2D();
+    if (HitComponent != TrackedContactBody.Get() || !IsValid(OtherActor) || !IsValid(OtherComponent)
+        || OtherActor == GetOwner() || FMath::Abs(Hit.ImpactNormal.Z) > 0.5 || Normal.IsNearlyZero()
+        || !OtherComponent->IsSimulatingPhysics(Hit.BoneName))
+    {
+        return;
+    }
+
+    const double Now = GetWorld()->GetTimeSeconds();
+    FHeavyContact* Match = HeavyContacts.FindByPredicate([&](const FHeavyContact& Contact)
+    {
+        return Contact.Body == OtherComponent && FVector::DotProduct(Contact.OutwardNormal, Normal) > 0.95;
+    });
+    if (Match)
+    {
+        Match->OutwardNormal = Normal;
+        Match->LastHitTime = Now;
+        return;
+    }
+
+    const double OtherMass = OtherComponent->GetMass();
+    if (OtherMass <= TrackedBodyMass * MinMassRatio || !OtherActor->FindComponentByClass<UCarryableComponent>())
+    {
+        return;
+    }
+
+    if (HeavyContacts.Num() < MaxHeavyContacts)
+    {
+        HeavyContacts.Add({ OtherComponent, Normal, OtherMass, Now });
+        return;
+    }
+    FHeavyContact* Oldest = &HeavyContacts[0];
+    for (FHeavyContact& Contact : HeavyContacts)
+    {
+        if (Contact.LastHitTime < Oldest->LastHitTime)
+        {
+            Oldest = &Contact;
+        }
+    }
+    *Oldest = { OtherComponent, Normal, OtherMass, Now };
+}
+
+FVector UCarryPhysicsComponent::LimitContactTarget(const FVector& Target, const FVector& GripPoint, double AllowedError) const
+{
+    CSV_SCOPED_TIMING_STAT(CarryContacts, LimitContactTarget);
+    FVector Error = Target - GripPoint;
+    for (const FHeavyContact& Contact : HeavyContacts)
+    {
+        const double InwardError = -FVector::DotProduct(Error, Contact.OutwardNormal);
+        if (InwardError > AllowedError)
+        {
+            const double Limit = FMath::SmoothStep(MinMassRatio, FullLimitMassRatio, Contact.OtherMass / TrackedBodyMass);
+            Error += Contact.OutwardNormal * (InwardError - AllowedError) * Limit;
+        }
+    }
+    return GripPoint + Error;
 }
 
 void UCarryPhysicsComponent::ReleaseGripConstraint(FActiveGripConstraint& Entry)
@@ -113,6 +220,7 @@ void UCarryPhysicsComponent::HandleGripsChanged()
     AActor* Owner = GetOwner();
     if (!Owner)
     {
+        SetContactTracking(nullptr);
         ReleaseAllConstraints();
         PostReleaseReplicationTimer = 0.0;
         SetComponentTickEnabled(false);
@@ -124,6 +232,7 @@ void UCarryPhysicsComponent::HandleGripsChanged()
 
     if (!Owner->HasAuthority())
     {
+        SetContactTracking(nullptr);
         ReleaseAllConstraints();
         PostReleaseReplicationTimer = 0.0;
         Owner->SetMinNetUpdateFrequency(10.0f);
@@ -133,6 +242,7 @@ void UCarryPhysicsComponent::HandleGripsChanged()
 
     if (!Item || Item->Grips.IsEmpty())
     {
+        SetContactTracking(nullptr);
         const bool bHadConstraints = !ActiveConstraints.IsEmpty();
         ReleaseAllConstraints();
         if (Body)
@@ -186,6 +296,7 @@ void UCarryPhysicsComponent::TickComponent(float DeltaTime, ELevelTick TickType,
     AActor* Owner = GetOwner();
     if (!Owner)
     {
+        SetContactTracking(nullptr);
         ReleaseAllConstraints();
         PostReleaseReplicationTimer = 0.0;
         SetComponentTickEnabled(false);
@@ -196,6 +307,7 @@ void UCarryPhysicsComponent::TickComponent(float DeltaTime, ELevelTick TickType,
     UPrimitiveComponent* Body = CachedBody ? CachedBody.Get() : Cast<UPrimitiveComponent>(Owner->GetRootComponent());
     if (!Item || Item->Grips.IsEmpty())
     {
+        SetContactTracking(nullptr);
         ReleaseAllConstraints();
         if (Owner->HasAuthority() && PostReleaseReplicationTimer > 0.0 && Body && Body->IsSimulatingPhysics())
         {
@@ -249,6 +361,7 @@ void UCarryPhysicsComponent::TickComponent(float DeltaTime, ELevelTick TickType,
     const FPhysicsActorHandle GrabbedHandle = BodyInstance ? BodyInstance->GetPhysicsActor() : nullptr;
     if (!BodyInstance || !Body->IsSimulatingPhysics() || !FPhysicsInterface::IsValid(GrabbedHandle))
     {
+        SetContactTracking(nullptr);
         ReleaseAllConstraints();
         for (FCarryGrip& Grip : Item->Grips)
         {
@@ -267,6 +380,7 @@ void UCarryPhysicsComponent::TickComponent(float DeltaTime, ELevelTick TickType,
     }
     if (ValidHolderCount == 0)
     {
+        SetContactTracking(nullptr);
         ReleaseAllConstraints();
         for (FCarryGrip& Grip : Item->Grips)
         {
@@ -282,6 +396,19 @@ void UCarryPhysicsComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 
     const double StepDt = FMath::Max(static_cast<double>(DeltaTime), UE_SMALL_NUMBER);
     const double Mass = FMath::Max(static_cast<double>(Body->GetMass()), UE_SMALL_NUMBER);
+    if (bHasAuthority)
+    {
+        TrackedBodyMass = Mass;
+        SetContactTracking(CVarLimitHeavyContactPush.GetValueOnGameThread() != 0 ? Body : nullptr);
+        if (!HeavyContacts.IsEmpty())
+        {
+            const double Cutoff = Owner->GetWorld()->GetTimeSeconds() - ContactExpirySeconds;
+            HeavyContacts.RemoveAllSwap([Cutoff](const FHeavyContact& Contact)
+            {
+                return Contact.LastHitTime < Cutoff || !Contact.Body.IsValid();
+            }, EAllowShrinking::No);
+        }
+    }
     const FVector Inertia = BodyInstance->GetBodyInertiaTensor();
     const double AvgInertia = FMath::Max((Inertia.X + Inertia.Y + Inertia.Z) / 3.0, 1.0);
     const FTransform BodyTransform = Body->GetComponentTransform();
@@ -669,6 +796,13 @@ void UCarryPhysicsComponent::TickComponent(float DeltaTime, ELevelTick TickType,
                 const double HoldTorque = Grip.SwingHoldAlpha * AngularTorqueCapChaos * AngularOrientScale;
                 const bool bHoldTilt = HoldTorque > UE_SMALL_NUMBER;
                 FTransform JointTarget = KinematicTarget;
+                if (!HeavyContacts.IsEmpty())
+                {
+                    // Keep the camera target intact. Limit only the endpoint that drives the
+                    // joint, and only along the horizontal normal toward a heavy contact.
+                    const double AllowedError = HeavyContactAcceleration * CentimetersPerMeter * MassPerHolder / LinearStiffnessChaos;
+                    JointTarget.SetLocation(LimitContactTarget(KinematicTarget.GetLocation(), BodyContact, AllowedError));
+                }
                 if (bHoldTilt)
                 {
                     const FQuat RotationFromHold = GrabbedWorldTransform.GetRotation() * Grip.SwingHoldRotation.Inverse();
