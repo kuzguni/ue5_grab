@@ -31,6 +31,7 @@ namespace
         int32 BlockedLeg = 0;
 
         bool CanReach() const { return Radius > 0.0f && BlockedLeg == 0; }
+        bool IsBlocked() const { return BlockedLeg != 0; }
     };
 
     FGripReach EvaluateGripReach(UWorld& World, const APawn& Holder, const UPrimitiveComponent& Body,
@@ -259,13 +260,22 @@ bool UCarryableComponent::TryAddGrip(APawn& Holder, const FHitResult& Hit)
 
     Item->FlushNetDormancy();
     Body->WakeAllRigidBodies();
-    const FTransform& BodyTransform = Body->GetComponentTransform();
     FCarryGrip& Grip = Grips.AddDefaulted_GetRef();
     Grip.Holder = &Holder;
     if (const APlayerState* PlayerState = Holder.GetPlayerState())
     {
         Grip.PlayerId = PlayerState->GetPlayerId();
     }
+    InitializeGripAnchor(Grip, Holder, *Body, Hit);
+    Item->ForceNetUpdate();
+    OnRep_Grips();
+    return true;
+}
+
+void UCarryableComponent::InitializeGripAnchor(FCarryGrip& Grip, const APawn& Holder, UPrimitiveComponent& Body,
+    const FHitResult& Hit) const
+{
+    const FTransform& BodyTransform = Body.GetComponentTransform();
     Grip.LocalPoint = BodyTransform.InverseTransformPosition(Hit.ImpactPoint);
     Grip.LocalNormal = BodyTransform.InverseTransformVectorNoScale(Hit.ImpactNormal).GetSafeNormal();
     const FTransform View = GetCarryViewTransform(Holder);
@@ -276,18 +286,106 @@ bool UCarryableComponent::TryAddGrip(APawn& Holder, const FHitResult& Hit)
     Grip.SmoothedHoldDistance = InitialOffset.Size();
     Grip.CarryTargetYaw = FMath::Atan2(InitialOffset.Y, InitialOffset.X);
     Grip.SmoothedHorizontalReach = InitialOffset.Size2D();
-    Grip.CenterRadiusOffset = static_cast<float>((Body->GetCenterOfMass() - View.GetLocation()).Size2D() - Grip.SmoothedHorizontalReach);
+    Grip.CenterRadiusOffset = static_cast<float>((Body.GetCenterOfMass() - View.GetLocation()).Size2D() - Grip.SmoothedHorizontalReach);
     Grip.InitializedHolder = &Holder;
     Grip.InitializedLocalPoint = Grip.LocalPoint;
     Grip.LastRawViewLocation = View.GetLocation();
     Grip.LastRawViewRotation = View.GetRotation();
     Grip.RemoteViewAngularVelocity = FVector::ZeroVector;
     Grip.TimeSinceViewSample = 0.0;
-    Grip.InitialBodyRotation = Body->GetComponentTransform().GetRotation();
+    Grip.bStabilizeTurnDistance = false;
+    Grip.bEaseOutFastTurn = false;
+    Grip.RecentLookSpeed = 0.0;
+    Grip.InitialBodyRotation = BodyTransform.GetRotation();
     Grip.InitialViewYaw = View.GetRotation().Rotator().Yaw;
+}
+
+void UCarryableComponent::UpdateAutoRegrip(const APawn& Holder, double Now)
+{
+    AActor* Item = GetOwner();
+    UPrimitiveComponent* Body = GetBodyComponent();
+    if (!Item || !Item->HasAuthority() || !Body || !Body->IsSimulatingPhysics()
+        || Grips.Num() != 1 || Grips[0].Holder != &Holder)
+    {
+        return;
+    }
+
+    constexpr double ReachCheckInterval = 0.10;
+    constexpr double ClearGrace = 0.20;
+    constexpr double MinGripChange = 5.0;
+    FCarryGrip& Grip = Grips[0];
+    if (Now < Grip.NextReachCheck)
+    {
+        return;
+    }
+    Grip.NextReachCheck = Now + ReachCheckInterval;
+
+    UWorld& World = *Item->GetWorld();
+    const FTransform& BodyTransform = Body->GetComponentTransform();
+    const FVector Contact = BodyTransform.TransformPosition(Grip.LocalPoint);
+    const FVector Normal = BodyTransform.TransformVectorNoScale(Grip.LocalNormal).GetSafeNormal();
+    const FGripReach Reach = EvaluateGripReach(World, Holder, *Body, Contact, Normal);
+    if (!Reach.IsBlocked())
+    {
+        if (!Grip.bSuppressSwing || !Reach.CanReach())
+        {
+            Grip.ClearReachSince = -1.0;
+            return;
+        }
+        if (Grip.ClearReachSince < 0.0)
+        {
+            Grip.ClearReachSince = Now;
+        }
+        if (Now - Grip.ClearReachSince >= ClearGrace)
+        {
+            Grip.bSuppressSwing = false;
+            Grip.bRegrippedWhileBlocked = false;
+        }
+        return;
+    }
+
+    Grip.ClearReachSince = -1.0;
+    if (!Grip.bSuppressSwing)
+    {
+        Grip.SwingHoldRotation = BodyTransform.GetRotation();
+        Grip.bSuppressSwing = true;
+    }
+    if (Grip.bRegrippedWhileBlocked)
+    {
+        return;
+    }
+
+    static const FCarryPlayerSettings Defaults;
+    const UPlayerCarryComponent* PlayerCarry = Holder.FindComponentByClass<UPlayerCarryComponent>();
+    const FCarryPlayerSettings* Profile = PlayerCarry ? PlayerCarry->GetProfileSettings() : nullptr;
+    const FCarryPlayerSettings& Settings = Profile ? *Profile : Defaults;
+    const FTransform View = GetCarryViewTransform(Holder);
+    const FVector Eye = View.GetLocation();
+    const FCollisionQueryParams Query(SCENE_QUERY_STAT(CarryAutoRegrip), false, &Holder);
+    FHitResult Hit;
+    const auto FindNewContact = [&](const FVector& End)
+    {
+        return World.LineTraceSingleByChannel(Hit, Eye, End, ECC_Visibility, Query)
+            && Hit.GetComponent() == Body
+            && !Hit.bStartPenetrating
+            && FVector::DistSquared(Eye, Hit.ImpactPoint) <= FMath::Square(FMath::Max(1.0f, Settings.PickupReach))
+            && FVector::DistSquared(Reach.Start, Hit.ImpactPoint) <= FMath::Square(FMath::Max(1.0f, Settings.HandReachDistance))
+            && FVector::DistSquared(Contact, Hit.ImpactPoint) >= FMath::Square(MinGripChange);
+    };
+    if (!FindNewContact(View.TransformPosition(FVector(Settings.PickupReach, 0.0, 0.0)))
+        && !FindNewContact(Body->GetCenterOfMass()))
+    {
+        return;
+    }
+
+    const double DesiredDistance = Grip.ViewLocalTarget.Size();
+    InitializeGripAnchor(Grip, Holder, *Body, Hit);
+    Grip.ViewLocalTarget = Grip.ViewLocalTarget.GetSafeNormal(UE_SMALL_NUMBER, FVector::ForwardVector) * DesiredDistance;
+    Grip.RegripTime = Now;
+    Grip.bRegrippedWhileBlocked = true;
+    Item->FlushNetDormancy();
     Item->ForceNetUpdate();
     OnRep_Grips();
-    return true;
 }
 
 void UCarryableComponent::RemoveGrip(const APawn& Holder)

@@ -67,6 +67,9 @@ private:
     UPROPERTY(EditAnywhere, Category = "Carry|Reach Trace", meta = (ClampMin = "1", Units = "cm", ToolTip = "Sphere radius used by both segments of the pickup trace."))
     float HandSweepRadius = 2.0f;
 
+    UPROPERTY(EditAnywhere, Category = "Carry|Reach Trace", meta = (ToolTip = "While carrying alone, move the grip to a visible point on the item when the center trace is blocked and suppress swing until the path clears."))
+    bool bAutoRegrip = true;
+
     /** Pickup reach when no player profile is assigned. */
     UPROPERTY(EditDefaultsOnly, Category = "Carry", meta = (ClampMin = "1", Units = "cm", EditCondition = "PlayerProfile == nullptr", EditConditionHides))
     float MaxReach = 350.0f;

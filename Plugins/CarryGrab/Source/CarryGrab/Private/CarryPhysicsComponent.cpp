@@ -474,6 +474,10 @@ void UCarryPhysicsComponent::TickComponent(float DeltaTime, ELevelTick TickType,
         {
             Grip.RotationInput = 0;
             Grip.bHasManualYawTarget = false;
+            Grip.bSuppressSwing = false;
+            Grip.bRegrippedWhileBlocked = false;
+            Grip.ClearReachSince = -1.0;
+            Grip.SwingHoldAlpha = 0.0;
         }
         if (Grip.RotationInput != 0 && !Grip.bHasManualYawTarget)
         {
@@ -652,11 +656,34 @@ void UCarryPhysicsComponent::TickComponent(float DeltaTime, ELevelTick TickType,
                     AxisMaxForce *= (MaxForce / SumVertCap);
                 }
 
+                if (Grip.RegripTime >= 0.0)
+                {
+                    constexpr double RegripBlendTime = 0.12;
+                    AxisMaxForce *= FMath::SmoothStep(0.0, RegripBlendTime,
+                        Owner->GetWorld()->GetTimeSeconds() - Grip.RegripTime + StepDt);
+                }
+
+                // Ramp the temporary pose drive in and out. The regular angular velocity drive still controls yaw.
+                Grip.SwingHoldAlpha = FMath::FInterpConstantTo(Grip.SwingHoldAlpha, Grip.bSuppressSwing ? 1.0 : 0.0,
+                    StepDt, Grip.bSuppressSwing ? 12.0 : 5.0);
+                const double HoldTorque = Grip.SwingHoldAlpha * AngularTorqueCapChaos * AngularOrientScale;
+                const bool bHoldTilt = HoldTorque > UE_SMALL_NUMBER;
+                FTransform JointTarget = KinematicTarget;
+                if (bHoldTilt)
+                {
+                    const FQuat RotationFromHold = GrabbedWorldTransform.GetRotation() * Grip.SwingHoldRotation.Inverse();
+                    FQuat Tilt, Yaw;
+                    RotationFromHold.ToSwingTwist(FVector::UpVector, Tilt, Yaw);
+                    JointTarget.SetRotation(Yaw * Grip.SwingHoldRotation * ActiveConstraint->GrabbedLocalFrame.GetRotation());
+                }
+                const double PoseStiffness = HoldTorque / FMath::DegreesToRadians(5.0);
+                const double PoseDamping = 2.0 * DriveDampingRatio * FMath::Sqrt(PoseStiffness * AvgInertia);
+                const double AngularDamping = FMath::Max(AngularDampingChaos, PoseDamping);
                 const FVector LocalAngVelTarget = ConnectorWorldRot.UnrotateVector(FVector(0.0, 0.0, -YawAlignVelZ));
 
                 FPhysicsCommand::ExecuteWrite(ActiveConstraint->ConstraintHandle, [&](const FPhysicsConstraintHandle& InConstraint)
                 {
-                    FPhysicsInterface::SetKinematicTarget_AssumesLocked(ActiveConstraint->KinematicHandle, KinematicTarget);
+                    FPhysicsInterface::SetKinematicTarget_AssumesLocked(ActiveConstraint->KinematicHandle, JointTarget);
                     if (Chaos::FJointConstraint* Constraint = static_cast<Chaos::FJointConstraint*>(InConstraint.Constraint))
                     {
                         Constraint->SetLinearPositionDriveEnabled(Chaos::TVec3<bool>(MaxForce > 0.0));
@@ -665,11 +692,11 @@ void UCarryPhysicsComponent::TickComponent(float DeltaTime, ELevelTick TickType,
                         Constraint->SetLinearDriveDamping(Chaos::FVec3(LinearDampingChaos));
                         Constraint->SetLinearDriveMaxForce(Chaos::FVec3(AxisMaxForce.X, AxisMaxForce.Y, AxisMaxForce.Z));
 
-                        Constraint->SetAngularSLerpPositionDriveEnabled(false);
+                        Constraint->SetAngularSLerpPositionDriveEnabled(bHoldTilt);
                         Constraint->SetAngularSLerpVelocityDriveEnabled(AngularTorqueCapChaos > 0.0);
                         Constraint->SetAngularDriveVelocityTarget(Chaos::FVec3(LocalAngVelTarget.X, LocalAngVelTarget.Y, LocalAngVelTarget.Z));
-                        Constraint->SetAngularDriveStiffness(Chaos::FVec3(0.0));
-                        Constraint->SetAngularDriveDamping(Chaos::FVec3(AngularDampingChaos));
+                        Constraint->SetAngularDriveStiffness(Chaos::FVec3(PoseStiffness));
+                        Constraint->SetAngularDriveDamping(Chaos::FVec3(AngularDamping));
                         Constraint->SetAngularDriveMaxTorque(Chaos::FVec3(AngularTorqueCapChaos));
                     }
                 });

@@ -56,6 +56,13 @@ struct FCarryGrip
     int32 RotationInput = 0;
     bool bHasManualYawTarget = false;
     FQuat ManualYawTarget = FQuat::Identity;
+    FQuat SwingHoldRotation = FQuat::Identity;
+    double NextReachCheck = 0.0;
+    double ClearReachSince = -1.0;
+    double RegripTime = -1.0;
+    double SwingHoldAlpha = 0.0;
+    bool bSuppressSwing = false;
+    bool bRegrippedWhileBlocked = false;
 };
 
 UCLASS(ClassGroup = (Carry), meta = (BlueprintSpawnableComponent))
@@ -88,6 +95,8 @@ private:
     friend class UPlayerCarryComponent;
 
     bool TryAddGrip(APawn& Holder, const FHitResult& Hit);
+    void UpdateAutoRegrip(const APawn& Holder, double Now);
+    void InitializeGripAnchor(FCarryGrip& Grip, const APawn& Holder, UPrimitiveComponent& Body, const FHitResult& Hit) const;
     void RemoveGrip(const APawn& Holder);
     bool HasGripFor(const APawn& Holder) const;
     bool TryGetGripWorldPoint(const APawn& Holder, FVector& OutPoint) const;

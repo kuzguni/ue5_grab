@@ -61,7 +61,7 @@ void UPlayerCarryComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
         return;
     }
 
-    const UCarryableComponent* Item = HeldItem.Get();
+    UCarryableComponent* Item = HeldItem.Get();
     FVector GripPoint;
     if (!Item || !Item->TryGetGripWorldPoint(*Pawn, GripPoint))
     {
@@ -74,6 +74,10 @@ void UPlayerCarryComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
     if (FVector::DistSquared(Pawn->GetPawnViewLocation(), GripPoint) <= FMath::Square(HeldReach))
     {
         OutOfReachSince = -1.0;
+        if (bAutoRegrip)
+        {
+            Item->UpdateAutoRegrip(*Pawn, GetWorld()->GetTimeSeconds());
+        }
         return;
     }
 
