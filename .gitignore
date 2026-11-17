@@ -1,4 +1,4 @@
-# Generated Unreal files
+# Generated Unreal output, including plugin output
 Binaries/
 DerivedDataCache/
 Intermediate/
@@ -6,6 +6,7 @@ Saved/
 *.log
 
 # Local editor and agent settings
+/.claude/settings.local.json
 /.codex/
 /.cursor/
 /.gemini/
@@ -14,11 +15,33 @@ Saved/
 .idea/
 .vs/
 
-# Generated IDE projects and OS files
-*.sln
+# IDE projects generated at the Unreal project root
+/*.sln
+/*.vcxproj
+/*.vcxproj.filters
+/*.vcproj
+/*.xcodeproj/
+/*.xcworkspace/
+/compile_commands.json
+
+# Per-user IDE state
+*.csproj.user
 *.suo
+*.sln.docstates
 *.vcxproj.user
+*.vcproj.user
+*.VC.db
+*.VC.opendb
+*.sln.iml
+xcuserdata/
+
+# Local Python bytecode from Unreal editor scripts
+__pycache__/
+*.py[cod]
+
+# OS metadata
 Thumbs.db
+Desktop.ini
 .DS_Store
 
 # Local project resources and notes
