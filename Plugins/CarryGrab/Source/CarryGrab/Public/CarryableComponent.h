@@ -54,6 +54,8 @@ struct FCarryGrip
     FQuat InitialBodyRotation = FQuat::Identity;
     double InitialViewYaw = 0.0;
     int32 RotationInput = 0;
+    int32 PreviousRotationInput = 0;
+    double RotationHoldDuration = 0.0;
     bool bHasManualYawTarget = false;
     FQuat ManualYawTarget = FQuat::Identity;
     FQuat SwingHoldRotation = FQuat::Identity;
@@ -65,6 +67,7 @@ struct FCarryGrip
     bool bRegrippedWhileBlocked = false;
 };
 
+/** Owns a carryable item's grip membership and reconciles its physics and collision components. */
 UCLASS(ClassGroup = (Carry), meta = (BlueprintSpawnableComponent))
 class CARRYGRAB_API UCarryableComponent : public UActorComponent
 {
@@ -96,8 +99,12 @@ private:
 
     bool TryAddGrip(APawn& Holder, const FHitResult& Hit);
     void UpdateAutoRegrip(const APawn& Holder, double Now);
+    static void UpdateClearRegrip(FCarryGrip& Grip, bool bCanReach, double Now);
+    void ApplyRegrip(AActor& Item, FCarryGrip& Grip, const APawn& Holder, UPrimitiveComponent& Body, const FHitResult& Hit, double Now);
     void InitializeGripAnchor(FCarryGrip& Grip, const APawn& Holder, UPrimitiveComponent& Body, const FHitResult& Hit) const;
     void RemoveGrip(const APawn& Holder);
+    FCarryGrip* FindGripFor(const APawn& Holder);
+    void SetSoloGripRotationInput(const APawn& Holder, int32 Direction);
     bool HasGripFor(const APawn& Holder) const;
     bool TryGetGripWorldPoint(const APawn& Holder, FVector& OutPoint) const;
     void RemoveInvalidGrips();

@@ -1,7 +1,7 @@
 #include "CarryCollisionComponent.h"
 
 #include "CarryableComponent.h"
-#include "CollisionQueryParams.h"
+#include "World/CarryWorldQueries.h"
 #include "Components/PrimitiveComponent.h"
 #include "GameFramework/Pawn.h"
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
@@ -135,8 +135,7 @@ void UCarryCollisionComponent::RestoreSeparatedHolders()
 
         UPrimitiveComponent* HolderBody = Cast<UPrimitiveComponent>(Holder->GetRootComponent());
         // Restoring contacts inside the capsule would let the solver eject the prop.
-        if (ItemBody && HolderBody && ItemBody->ComponentOverlapComponent(
-            HolderBody, HolderBody->GetComponentLocation(), HolderBody->GetComponentQuat(), FCollisionQueryParams::DefaultQueryParam))
+        if (ItemBody && HolderBody && CarryWorld::OverlapsHolder(*ItemBody, *HolderBody))
         {
             bWaitingForSeparation = true;
             continue;

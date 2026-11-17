@@ -8,6 +8,8 @@
 class APawn;
 class UCarryableComponent;
 class UPrimitiveComponent;
+struct FCarryGrip;
+struct FCarryItemSettings;
 struct FHitResult;
 
 /** Drives each accepted holder's grip through a Chaos 6-DOF constraint on the authoritative rigid body. */
@@ -48,9 +50,23 @@ private:
         FPhysicsConstraintHandle ConstraintHandle;
     };
 
+    FActiveGripConstraint* FindOrCreateGripConstraint(const FCarryGrip& Grip, const APawn& Holder,
+        FPhysScene* Scene, const FPhysicsActorHandle& GrabbedHandle, const FTransform& GrabbedWorldTransform,
+        const FVector& BodyContact, const FTransform& KinematicTarget);
     void PruneInactiveConstraints(const UCarryableComponent* Item);
     void ReleaseGripConstraint(FActiveGripConstraint& Entry);
     void ReleaseAllConstraints();
+
+    struct FBodyDrive;
+    struct FHolderDrive;
+
+    FBodyDrive CalculateBodyDrive(const TArray<FCarryGrip>& Grips, int32 HolderCount,
+        const FCarryItemSettings* Settings, double Mass, double GravityZ, double AvgInertia, double StepDt) const;
+    static FHolderDrive CalculateHolderDrive(const FBodyDrive& Drive, bool bSolo, double ForceNewtons, double TorqueNm);
+    bool UpdateGripConstraintDrive(FActiveGripConstraint& ActiveConstraint, FCarryGrip& Grip, UPrimitiveComponent& Body,
+        const UCarryableComponent& Item, const FBodyDrive& Drive, const FHolderDrive& HolderDrive,
+        const FTransform& GrabbedWorldTransform, const FVector& BodyLocation, const FVector& BodyContact,
+        const FTransform& KinematicTarget, double YawAlignVelZ);
 
     struct FHeavyContact
     {
@@ -60,7 +76,13 @@ private:
         double LastHitTime;
     };
 
+    void TickReleasedBody(AActor& Owner, UPrimitiveComponent* Body, float DeltaTime);
+    void RefreshHeavyObstacleTracking(const AActor& Owner, UPrimitiveComponent* Body, double Mass);
+    void ClearHeavyObstacleTracking();
+    void SetApproachTracking(UPrimitiveComponent* Body);
     void SetContactTracking(UPrimitiveComponent* Body);
+    FVector LimitJointTarget(const FVector& Target, UPrimitiveComponent& Body, const UCarryableComponent& Item,
+        const FVector& BodyLocation, const FVector& BodyContact, double MassPerHolder, double LinearStiffnessChaos);
     FVector LimitContactTarget(const FVector& Target, const FVector& GripPoint, double AllowedError) const;
     void UpdateHeavyApproach(UPrimitiveComponent& Body, const UCarryableComponent& Item,
         const FVector& DriveError, double Now);
@@ -73,6 +95,7 @@ private:
 
     TWeakObjectPtr<UPrimitiveComponent> TrackedContactBody;
     TArray<FHeavyContact, TInlineAllocator<4>> HeavyContacts;
+    TWeakObjectPtr<UPrimitiveComponent> TrackedApproachSourceBody;
     TWeakObjectPtr<UPrimitiveComponent> ApproachBody;
     FVector ApproachNormal = FVector::ZeroVector;
     FVector ApproachStopOffset = FVector::ZeroVector;

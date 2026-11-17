@@ -37,7 +37,7 @@ struct CARRYGRAB_API FCarryPlayerSettings
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Controls", meta = (ClampMin = "1", Units = "cm", ToolTip = "Closest the scroll control normally moves the target. Picking up closer is still allowed."))
     float MinimumHoldDistance = 55.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Controls", meta = (ClampMin = "0", ClampMax = "120", ToolTip = "Base requested yaw speed while holding a rotation button, in degrees per second. The item profile slows the request for heavier loads per holder, and grip torque limits the actual rotation."))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Controls", meta = (ClampMin = "0", ClampMax = "120", ToolTip = "Legacy profile field. Player carry components use their own Rotation Start Speed Degrees. Effective Player Settings reports the component's starting speed."))
     float RotationSpeedDegrees = 70.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effort", meta = (ClampMin = "0", ToolTip = "Maximum pull this player can supply to one grip, in newtons. Other holders have their own limits."))
