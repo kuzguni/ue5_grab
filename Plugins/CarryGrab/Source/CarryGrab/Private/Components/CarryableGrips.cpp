@@ -64,6 +64,7 @@ void UCarryableComponent::InitializeGripAnchor(FCarryGrip& Grip, const APawn& Ho
     Grip.SmoothedHoldDistance = InitialOffset.Size();
     Grip.CarryTargetYaw = FMath::Atan2(InitialOffset.Y, InitialOffset.X);
     Grip.SmoothedHorizontalReach = InitialOffset.Size2D();
+    Grip.CarryTargetPitch = FMath::Atan2(InitialOffset.Z, Grip.SmoothedHorizontalReach);
     Grip.CenterRadiusOffset = static_cast<float>((Body.GetCenterOfMass() - View.GetLocation()).Size2D() - Grip.SmoothedHorizontalReach);
     Grip.InitializedHolder = &Holder;
     Grip.InitializedLocalPoint = Grip.LocalPoint;
@@ -73,6 +74,7 @@ void UCarryableComponent::InitializeGripAnchor(FCarryGrip& Grip, const APawn& Ho
     Grip.TimeSinceViewSample = 0.0;
     Grip.bStabilizeTurnDistance = false;
     Grip.bEaseOutFastTurn = false;
+    Grip.bEaseOutFastPitch = false;
     Grip.RecentLookSpeed = 0.0;
     Grip.InitialBodyRotation = BodyTransform.GetRotation();
     Grip.InitialViewYaw = View.GetRotation().Rotator().Yaw;

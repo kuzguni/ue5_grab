@@ -46,9 +46,11 @@ struct FCarryGrip
     FVector RemoteViewAngularVelocity = FVector::ZeroVector;
     double TimeSinceViewSample = 0.0;
     double CarryTargetYaw = 0.0;
+    double CarryTargetPitch = 0.0;
     double SmoothedHorizontalReach = 0.0;
     bool bStabilizeTurnDistance = false;
     bool bEaseOutFastTurn = false;
+    bool bEaseOutFastPitch = false;
     double RecentLookSpeed = 0.0;
     FVector AppliedForce = FVector::ZeroVector;
     FQuat InitialBodyRotation = FQuat::Identity;

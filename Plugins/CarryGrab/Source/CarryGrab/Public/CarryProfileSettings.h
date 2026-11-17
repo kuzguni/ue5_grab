@@ -94,13 +94,13 @@ struct CARRYGRAB_API FCarryItemSettings
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Follow", meta = (ClampMin = "0.1", ClampMax = "1", ToolTip = "Lowest fraction of Target Follow Rate allowed as the load per holder increases. For example, 0.45 allows the rate to fall to 45 percent."))
     float MinimumHeavyFollowScale = 0.45f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Swing", meta = (ClampMin = "0", ClampMax = "1", ToolTip = "Fraction of available grip acceleration reserved for sweeping the target sideways during a turn. Higher values let it move faster around the player."))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Swing", meta = (ClampMin = "0", ClampMax = "1", ToolTip = "Fraction of available grip acceleration used to sweep the hold target during camera yaw and pitch. Higher values let the target move faster."))
     float TurnAccelerationFraction = 0.27f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Swing", meta = (ClampMin = "0", ClampMax = "1", ToolTip = "Multiplier on sideways turn acceleration at the reference load and above. Lower values ease the pull on heavier items during fast camera turns."))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Swing", meta = (ClampMin = "0", ClampMax = "1", ToolTip = "Multiplier on target turn acceleration at the reference load and above. Lower values ease the pull on heavier items during fast camera turns."))
     float LoadedTurnAccelerationScale = 0.60f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Swing", meta = (ClampMin = "0.01", Units = "s", ToolTip = "Controls how early the target eases off its sideways speed as it catches up. Higher values start braking sooner. Measured in seconds."))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Swing", meta = (ClampMin = "0.01", Units = "s", ToolTip = "Controls how early the target eases off its turn speed as it catches up. Higher values start braking sooner. Measured in seconds."))
     float TurnBrakingTime = 0.38f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Swing", meta = (ClampMin = "0", ToolTip = "Base rate at which the grip damps the prop's spin, in inverse seconds. Higher values reduce continued rotation after a turn."))

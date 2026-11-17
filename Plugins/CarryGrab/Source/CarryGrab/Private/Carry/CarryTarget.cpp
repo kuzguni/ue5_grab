@@ -10,7 +10,31 @@ namespace Carry
 {
     namespace
     {
-        constexpr double MinTurnRadius = 8.0; // cm, below this yaw has little physical effect
+        constexpr double MinTurnRadius = 8.0; // cm, below this turning has little physical effect
+
+        double CalculateTurnStep(double Error, double MaxSpeed, const FTargetFollow& Follow,
+            bool bHoldFastTurnState, bool& bEaseOut, double ExtraSpeedFraction)
+        {
+            const double Distance = FMath::Abs(Error);
+            bEaseOut |= Distance > MaxSpeed * Follow.StepDt;
+
+            // Brake along the remaining arc using v^2 = 2*a*d.
+            const double ArrivalSpeed = bEaseOut
+                ? FMath::Sqrt(2.0 * (MaxSpeed / Follow.BrakingTime) * Distance)
+                : MaxSpeed;
+            const double StepLimit = FMath::Min(MaxSpeed, ArrivalSpeed) * Follow.StepDt;
+            // A bounded extra step keeps yaw responsive on fast turns.
+            const double ExcessStep = FMath::Max(0.0, Distance - StepLimit);
+            const double ExtraSpeedBudget = ExtraSpeedFraction * StepLimit;
+            const double ExtraStep = ExcessStep * ExtraSpeedBudget
+                / FMath::Max(ExcessStep + ExtraSpeedBudget, UE_SMALL_NUMBER);
+            const double Step = FMath::Sign(Error) * (FMath::Min(Distance, StepLimit) + ExtraStep);
+            if (!bHoldFastTurnState)
+            {
+                bEaseOut &= !FMath::IsNearlyEqual(Step, Error);
+            }
+            return Step;
+        }
     }
 
     FGripTarget UpdateGripTarget(FCarryGrip& Grip, const APawn& Holder, const FTransform& ViewTransform,
@@ -32,12 +56,14 @@ namespace Carry
                 ? FMath::Atan2(InitialOffset.Y, InitialOffset.X)
                 : FMath::DegreesToRadians(ViewTransform.GetRotation().Rotator().Yaw);
             Grip.SmoothedHorizontalReach = InitialOffset.Size2D();
+            Grip.CarryTargetPitch = FMath::Atan2(InitialOffset.Z, Grip.SmoothedHorizontalReach);
             Grip.LastRawViewLocation = ViewTransform.GetLocation();
             Grip.LastRawViewRotation = ViewTransform.GetRotation();
             Grip.RemoteViewAngularVelocity = FVector::ZeroVector;
             Grip.TimeSinceViewSample = 0.0;
             Grip.bStabilizeTurnDistance = false;
             Grip.bEaseOutFastTurn = false;
+            Grip.bEaseOutFastPitch = false;
             Grip.RecentLookSpeed = 0.0;
             Grip.InitialBodyRotation = BodyRotation;
             Grip.InitialViewYaw = FMath::RadiansToDegrees(Grip.CarryTargetYaw);
@@ -74,9 +100,24 @@ namespace Carry
         }
 
         const FVector PreviousTarget = Grip.SmoothedTarget;
-        FVector TargetOffset = ViewOffset;
-        const double TurnRadius = ViewOffset.Size2D();
-        const double DesiredYaw = TurnRadius >= 1.0
+        const double DesiredHorizontalReach = ViewOffset.Size2D();
+        const double DesiredPitch = FMath::Atan2(ViewOffset.Z, DesiredHorizontalReach);
+        const double HoldDistance = Grip.SmoothedHoldDistance;
+        if (HoldDistance >= MinTurnRadius && TurningAcceleration > 0.0)
+        {
+            // Pitch sweeps through the full hold radius. Limit the arc before setting height and reach.
+            const double MaxPitchSpeed = FMath::Sqrt(TurningAcceleration / HoldDistance);
+            Grip.CarryTargetPitch += CalculateTurnStep(DesiredPitch - Grip.CarryTargetPitch, MaxPitchSpeed,
+                Follow, bHoldFastTurnState, Grip.bEaseOutFastPitch, 0.0);
+        }
+        else
+        {
+            Grip.CarryTargetPitch = DesiredPitch;
+            Grip.bEaseOutFastPitch = false;
+        }
+
+        const double TurnRadius = HoldDistance * FMath::Cos(Grip.CarryTargetPitch);
+        const double DesiredYaw = DesiredHorizontalReach >= 1.0
             ? FMath::Atan2(ViewOffset.Y, ViewOffset.X)
             : FMath::DegreesToRadians(ViewTransform.GetRotation().Rotator().Yaw);
         if (TurnRadius >= MinTurnRadius)
@@ -85,31 +126,10 @@ namespace Carry
             // Limit how fast the target sweeps sideways so the grip has force left to pull inward.
             const double MaxYawSpeed = FMath::Sqrt(TurningAcceleration / TurnRadius);
             const double YawError = FMath::FindDeltaAngleRadians(Grip.CarryTargetYaw, DesiredYaw);
-            const double YawDistance = FMath::Abs(YawError);
-            const bool bReachedTurnLimit = YawDistance > MaxYawSpeed * Follow.StepDt;
-            Grip.bStabilizeTurnDistance |= bReachedTurnLimit;
-            Grip.bEaseOutFastTurn |= bReachedTurnLimit;
-
-            // Start braking while there is still an arc left to travel. Using v^2 = 2*a*d
-            // ramps down the target's sideways speed instead of stopping it in one tick.
-            const double ArrivalSpeed = Grip.bEaseOutFastTurn
-                ? FMath::Sqrt(2.0 * (MaxYawSpeed / Follow.BrakingTime) * YawDistance)
-                : MaxYawSpeed;
-            const double StepLimit = FMath::Min(MaxYawSpeed, ArrivalSpeed) * Follow.StepDt;
-            // Let faster turns move the target faster even after it crosses the
-            // base speed limit. Bound the extra speed so the grip can catch up.
-            const double ExcessStep = FMath::Max(0.0, YawDistance - StepLimit);
-            const double ExtraSpeedBudget = 0.5 * StepLimit;
-            const double ExtraStep = ExcessStep * ExtraSpeedBudget
-                / FMath::Max(ExcessStep + ExtraSpeedBudget, UE_SMALL_NUMBER);
-            const double YawStep = FMath::Sign(YawError) * (FMath::Min(YawDistance, StepLimit) + ExtraStep);
-            if (!bHoldFastTurnState)
-            {
-                Grip.bEaseOutFastTurn &= !FMath::IsNearlyEqual(YawStep, YawError);
-            }
+            Grip.bStabilizeTurnDistance |= FMath::Abs(YawError) > MaxYawSpeed * Follow.StepDt;
+            const double YawStep = CalculateTurnStep(YawError, MaxYawSpeed, Follow, bHoldFastTurnState,
+                Grip.bEaseOutFastTurn, 0.5);
             Grip.CarryTargetYaw = FMath::UnwindRadians(Grip.CarryTargetYaw + YawStep);
-            TargetOffset.X = TurnRadius * FMath::Cos(Grip.CarryTargetYaw);
-            TargetOffset.Y = TurnRadius * FMath::Sin(Grip.CarryTargetYaw);
         }
         else
         {
@@ -117,6 +137,8 @@ namespace Carry
             Grip.bEaseOutFastTurn = false;
         }
 
+        const FVector TargetOffset(TurnRadius * FMath::Cos(Grip.CarryTargetYaw),
+            TurnRadius * FMath::Sin(Grip.CarryTargetYaw), HoldDistance * FMath::Sin(Grip.CarryTargetPitch));
         const FVector Target = ViewTransform.GetLocation() + TargetOffset;
         Grip.SmoothedTarget = FMath::Lerp(PreviousTarget, Target, Follow.TargetAlpha);
         Grip.SmoothedHorizontalReach = FMath::Lerp(Grip.SmoothedHorizontalReach, TurnRadius, Follow.TargetAlpha);
