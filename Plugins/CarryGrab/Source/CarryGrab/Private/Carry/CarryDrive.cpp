@@ -71,11 +71,12 @@ UCarryPhysicsComponent::FBodyDrive UCarryPhysicsComponent::CalculateBodyDrive(co
 }
 
 UCarryPhysicsComponent::FHolderDrive UCarryPhysicsComponent::CalculateHolderDrive(const FBodyDrive& Drive,
-    bool bSolo, double ForceNewtons, double TorqueNm)
+    bool bSolo, double ForceNewtons, double LiftForceNewtons, double TorqueNm)
 {
     const double MaxForce = Carry::CentimetersPerMeter * FMath::Max(0.0, FMath::Min(ForceNewtons, Drive.MassPerHolder * Drive.AccelerationCap));
+    const double MaxVerticalForce = FMath::Clamp(Carry::CentimetersPerMeter * LiftForceNewtons, 0.0, MaxForce);
     const double GravitySupportForce = FMath::Clamp(-Drive.MassPerHolder * Drive.GravityZ, 0.0, MaxForce);
-    const FVector PerHolderGravityHold(0.0, 0.0, GravitySupportForce);
+    const FVector PerHolderGravityHold(0.0, 0.0, FMath::Min(GravitySupportForce, MaxVerticalForce));
     const double FullForceExtension = MaxForce / Drive.LinearStiffnessChaos;
     const double TurningAcceleration = Drive.TurnFraction * MaxForce / Drive.MassPerHolder * FMath::Lerp(1.0, Drive.LoadedTurnScale, Drive.TurnLoadAlpha);
     const double WeightRatio = (-Drive.MassPerHolder * Drive.GravityZ) / FMath::Max(MaxForce, 1.0);
@@ -83,6 +84,6 @@ UCarryPhysicsComponent::FHolderDrive UCarryPhysicsComponent::CalculateHolderDriv
     const double AngularTorqueCapChaos = FMath::Min(FMath::Max(0.0, TorqueNm) * FMath::Square(Carry::CentimetersPerMeter), 0.5 * MaxForce * Drive.GyrationRadiusCm);
     const double RemainingHorizSq = FMath::Max(0.0, FMath::Square(MaxForce) - FMath::Square(GravitySupportForce));
     const double PerHorizCap = FMath::Max(0.45 * MaxForce, FMath::Sqrt(RemainingHorizSq)) / UE_SQRT_2;
-    return { PerHolderGravityHold, MaxForce, FullForceExtension, TurningAcceleration, AngularOrientScale,
+    return { PerHolderGravityHold, MaxForce, MaxVerticalForce, FullForceExtension, TurningAcceleration, AngularOrientScale,
         AngularTorqueCapChaos, PerHorizCap };
 }

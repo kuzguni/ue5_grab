@@ -47,5 +47,6 @@ namespace CarryWorld
         FHitResult& Hit);
     FHeavyApproachHit SweepHeavyApproach(UWorld& World, const AActor* ItemOwner, UPrimitiveComponent& Body,
         const TArray<FCarryGrip>& Grips, const FVector& Direction, double Distance, double Mass, double MinApproachMassRatio);
+    bool HasNearbySupport(UWorld& World, UPrimitiveComponent& Body, const APawn& Holder, const FTransform& BodyPose);
     bool OverlapsHolder(UPrimitiveComponent& ItemBody, UPrimitiveComponent& HolderBody);
 }

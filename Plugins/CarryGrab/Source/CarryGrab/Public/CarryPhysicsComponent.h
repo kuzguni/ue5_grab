@@ -28,6 +28,10 @@ public:
     UFUNCTION(BlueprintPure, Category = "Carry|Physics")
     FVector GetGripForceNewtons(const APawn* Holder) const;
 
+    /** Latest drive torque for one holder on the server, in newton-meters. */
+    UFUNCTION(BlueprintPure, Category = "Carry|Physics")
+    FVector GetGripTorqueNewtonMeters(const APawn* Holder) const;
+
 protected:
     virtual void BeginPlay() override;
     virtual void OnUnregister() override;
@@ -62,7 +66,8 @@ private:
 
     FBodyDrive CalculateBodyDrive(const TArray<FCarryGrip>& Grips, int32 HolderCount,
         const FCarryItemSettings* Settings, double Mass, double GravityZ, double AvgInertia, double StepDt) const;
-    static FHolderDrive CalculateHolderDrive(const FBodyDrive& Drive, bool bSolo, double ForceNewtons, double TorqueNm);
+    static FHolderDrive CalculateHolderDrive(const FBodyDrive& Drive, bool bSolo, double ForceNewtons,
+        double LiftForceNewtons, double TorqueNm);
     bool UpdateGripConstraintDrive(FActiveGripConstraint& ActiveConstraint, FCarryGrip& Grip, UPrimitiveComponent& Body,
         const UCarryableComponent& Item, const FBodyDrive& Drive, const FHolderDrive& HolderDrive,
         const FTransform& GrabbedWorldTransform, const FVector& BodyLocation, const FVector& BodyContact,

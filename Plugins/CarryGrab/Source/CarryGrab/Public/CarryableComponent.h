@@ -53,6 +53,13 @@ struct FCarryGrip
     bool bEaseOutFastPitch = false;
     double RecentLookSpeed = 0.0;
     FVector AppliedForce = FVector::ZeroVector;
+    FVector AppliedTorque = FVector::ZeroVector;
+    double MaxForce = 0.0;
+    double MaxTorque = 0.0;
+    double YawAlignVelZ = 0.0;
+    double TargetYawErrorRad = 0.0;
+    double AngularOrientScale = 0.0;
+    bool bUsingViewYawFollow = false;
     FQuat InitialBodyRotation = FQuat::Identity;
     double InitialViewYaw = 0.0;
     int32 RotationInput = 0;
@@ -90,6 +97,9 @@ public:
     TArray<int32> GetGripPlayerIds() const;
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+#if WITH_EDITOR
+    virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+#endif
 
 protected:
     virtual void BeginPlay() override;
@@ -133,9 +143,13 @@ private:
     UPROPERTY(EditAnywhere, Category = "Carry|Debug")
     bool bShowGripMarkers = true;
 
+    /** Draw item-level center-of-mass forces, torques, and remaining totals/capacities. */
+    UPROPERTY(EditAnywhere, Category = "Carry|Debug")
+    bool bShowItemDebug = true;
+
     /** Draw the two center sweeps from elbow height to the held grab point. */
     UPROPERTY(EditAnywhere, Category = "Carry|Debug")
-    bool bShowBentReachPreview = true;
+    bool bShowBentReachPreview = false;
 
     UPROPERTY(Transient)
     TObjectPtr<UPrimitiveComponent> CachedBody = nullptr;

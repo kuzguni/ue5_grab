@@ -135,6 +135,27 @@ namespace CarryWorld
         return {};
     }
 
+    bool HasNearbySupport(UWorld& World, UPrimitiveComponent& Body, const APawn& Holder, const FTransform& BodyPose)
+    {
+        constexpr double StartClearanceCm = 2.0;
+        constexpr double ContactToleranceCm = 1.0;
+        constexpr double MinSupportNormalZ = 0.65;
+        const FVector Position = BodyPose.GetLocation();
+        // Start above the current pose to get a surface normal even when Chaos allows slight penetration.
+        FComponentQueryParams Query(SCENE_QUERY_STAT(CarryFloorSupport), Body.GetOwner());
+        Query.AddIgnoredActor(&Holder);
+        Query.bFindInitialOverlaps = false;
+        TArray<FHitResult> Hits;
+        World.ComponentSweepMulti(Hits, &Body, Position + FVector::UpVector * StartClearanceCm,
+            Position - FVector::UpVector * ContactToleranceCm, BodyPose.GetRotation(), Query);
+        return Hits.ContainsByPredicate([](const FHitResult& Hit)
+        {
+            const UPrimitiveComponent* Surface = Hit.GetComponent();
+            return Hit.bBlockingHit && !Hit.bStartPenetrating && Hit.ImpactNormal.Z >= MinSupportNormalZ
+                && IsValid(Surface) && Surface->IsPhysicsCollisionEnabled() && !Cast<APawn>(Hit.GetActor());
+        });
+    }
+
     bool OverlapsHolder(UPrimitiveComponent& ItemBody, UPrimitiveComponent& HolderBody)
     {
         return ItemBody.ComponentOverlapComponent(&HolderBody, HolderBody.GetComponentLocation(),

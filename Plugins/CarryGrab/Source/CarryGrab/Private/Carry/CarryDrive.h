@@ -25,6 +25,7 @@ struct UCarryPhysicsComponent::FHolderDrive
 {
     FVector PerHolderGravityHold;
     double MaxForce;
+    double MaxVerticalForce;
     double FullForceExtension;
     double TurningAcceleration;
     double AngularOrientScale;

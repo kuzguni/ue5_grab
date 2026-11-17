@@ -164,6 +164,8 @@ namespace Carry
             Grip.bRegrippedWhileBlocked = false;
             Grip.ClearReachSince = -1.0;
             Grip.SwingHoldAlpha = 0.0;
+            Grip.TargetYawErrorRad = 0.0;
+            Grip.bUsingViewYawFollow = false;
         }
         if (Grip.RotationInput != 0 && !Grip.bHasManualYawTarget)
         {
@@ -217,6 +219,8 @@ namespace Carry
             // Avoid storing up a large rotation behind an obstacle while the button is held.
             Grip.ManualYawTarget = FQuat(FVector::UpVector, BoundedError - YawError) * Grip.ManualYawTarget;
             Grip.ManualYawTarget.Normalize();
+            Grip.TargetYawErrorRad = BoundedError;
+            Grip.bUsingViewYawFollow = false;
             const double ObstacleBackoff = 1.0 - FMath::SmoothStep(UE_PI / 8.0, UE_PI / 5.0, FMath::Abs(YawError));
             YawAlignVelZ = AngularOrientScale * (4.0 * BoundedError + EffectiveYawRateRad * ObstacleBackoff);
         }
@@ -224,6 +228,8 @@ namespace Carry
         {
             Grip.InitialBodyRotation = BodyRotation;
             Grip.InitialViewYaw = Target.YawDegrees;
+            Grip.TargetYawErrorRad = 0.0;
+            Grip.bUsingViewYawFollow = false;
         }
         else
         {
@@ -247,6 +253,8 @@ namespace Carry
                 Grip.InitialBodyRotation = ExcessTwistQuat * Grip.InitialBodyRotation;
             }
 
+            Grip.TargetYawErrorRad = ClampedYawErrorRad;
+            Grip.bUsingViewYawFollow = true;
             const double SwingAngleRad = WorldSwingQuat.GetAngle();
             const double SwingValidity = FMath::SmoothStep(2.2, 1.4, SwingAngleRad);
             constexpr double YawCatchupGain = 3.0;

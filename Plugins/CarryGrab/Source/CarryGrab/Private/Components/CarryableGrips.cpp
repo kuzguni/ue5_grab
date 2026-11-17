@@ -80,6 +80,14 @@ void UCarryableComponent::InitializeGripAnchor(FCarryGrip& Grip, const APawn& Ho
     Grip.InitialViewYaw = View.GetRotation().Rotator().Yaw;
     Grip.PreviousRotationInput = 0;
     Grip.RotationHoldDuration = 0.0;
+    Grip.AppliedForce = FVector::ZeroVector;
+    Grip.AppliedTorque = FVector::ZeroVector;
+    Grip.MaxForce = 0.0;
+    Grip.MaxTorque = 0.0;
+    Grip.YawAlignVelZ = 0.0;
+    Grip.TargetYawErrorRad = 0.0;
+    Grip.AngularOrientScale = 0.0;
+    Grip.bUsingViewYawFollow = false;
 }
 
 void UCarryableComponent::UpdateAutoRegrip(const APawn& Holder, double Now)

@@ -8,6 +8,7 @@
 
 #include "CarryableComponent.h"
 #include "World/CarryView.h"
+#include "World/CarryWorldQueries.h"
 #include "Components/PrimitiveComponent.h"
 #include "Engine/World.h"
 #include "PhysicsEngine/BodyInstance.h"
@@ -143,6 +144,20 @@ FVector UCarryPhysicsComponent::GetGripForceNewtons(const APawn* Holder) const
     return FVector::ZeroVector;
 }
 
+FVector UCarryPhysicsComponent::GetGripTorqueNewtonMeters(const APawn* Holder) const
+{
+    const UCarryableComponent* Item = CachedCarryable ? CachedCarryable.Get() : (GetOwner() ? GetOwner()->FindComponentByClass<UCarryableComponent>() : nullptr);
+    if (Item && Holder)
+    {
+        const FCarryGrip* Grip = Item->Grips.FindByPredicate([Holder](const FCarryGrip& Entry) { return Entry.Holder == Holder; });
+        if (Grip)
+        {
+            return Grip->AppliedTorque / FMath::Square(Carry::CentimetersPerMeter);
+        }
+    }
+    return FVector::ZeroVector;
+}
+
 void UCarryPhysicsComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
@@ -202,6 +217,13 @@ void UCarryPhysicsComponent::TickComponent(float DeltaTime, ELevelTick TickType,
         for (FCarryGrip& Grip : Item->Grips)
         {
             Grip.AppliedForce = FVector::ZeroVector;
+            Grip.AppliedTorque = FVector::ZeroVector;
+            Grip.MaxForce = 0.0;
+            Grip.MaxTorque = 0.0;
+            Grip.YawAlignVelZ = 0.0;
+            Grip.TargetYawErrorRad = 0.0;
+            Grip.AngularOrientScale = 0.0;
+            Grip.bUsingViewYawFollow = false;
         }
         return;
     }
@@ -221,6 +243,13 @@ void UCarryPhysicsComponent::TickComponent(float DeltaTime, ELevelTick TickType,
         for (FCarryGrip& Grip : Item->Grips)
         {
             Grip.AppliedForce = FVector::ZeroVector;
+            Grip.AppliedTorque = FVector::ZeroVector;
+            Grip.MaxForce = 0.0;
+            Grip.MaxTorque = 0.0;
+            Grip.YawAlignVelZ = 0.0;
+            Grip.TargetYawErrorRad = 0.0;
+            Grip.AngularOrientScale = 0.0;
+            Grip.bUsingViewYawFollow = false;
         }
         return;
     }
@@ -259,6 +288,13 @@ void UCarryPhysicsComponent::TickComponent(float DeltaTime, ELevelTick TickType,
         if (!IsValid(Holder))
         {
             Grip.AppliedForce = FVector::ZeroVector;
+            Grip.AppliedTorque = FVector::ZeroVector;
+            Grip.MaxForce = 0.0;
+            Grip.MaxTorque = 0.0;
+            Grip.YawAlignVelZ = 0.0;
+            Grip.TargetYawErrorRad = 0.0;
+            Grip.AngularOrientScale = 0.0;
+            Grip.bUsingViewYawFollow = false;
             continue;
         }
 
@@ -267,13 +303,29 @@ void UCarryPhysicsComponent::TickComponent(float DeltaTime, ELevelTick TickType,
         const UPlayerCarryComponent* PlayerCarry = Holder->FindComponentByClass<UPlayerCarryComponent>();
         const FCarryPlayerSettings* PlayerSettings = PlayerCarry ? PlayerCarry->GetProfileSettings() : nullptr;
         const double ForceNewtons = PlayerSettings ? PlayerSettings->MaxForceNewtons : MaxHolderForceNewtons;
+        const double LiftForceNewtons = PlayerSettings ? PlayerSettings->MaxLiftForceNewtons : FCarryPlayerSettings{}.MaxLiftForceNewtons;
         const double TorqueNm = PlayerSettings ? PlayerSettings->MaxTorqueNewtonMeters : MaxStabilizingTorqueNm;
-        const FHolderDrive HolderDrive = CalculateHolderDrive(Drive, HolderCount == 1, ForceNewtons, TorqueNm);
+        const FHolderDrive HolderDrive = CalculateHolderDrive(Drive, HolderCount == 1, ForceNewtons, LiftForceNewtons, TorqueNm);
 
         const Carry::FGripTarget Target = Carry::UpdateGripTarget(Grip, *Holder, GetCarryViewTransform(*Holder), GrabbedWorldTransform.GetRotation(),
             PlayerSettings ? PlayerSettings->HoldDistanceFollowRate : 10.0f, Drive.Follow, HolderDrive.TurningAcceleration);
+        constexpr double MaxSupportedYawScale = 0.65;
+        double YawOrientScale = HolderDrive.AngularOrientScale;
+        if (bHasAuthority && HolderCount == 1 && Grip.RotationInput != 0 && HolderDrive.AngularTorqueCapChaos > 0.0
+            && YawOrientScale < MaxSupportedYawScale
+            && CarryWorld::HasNearbySupport(*Owner->GetWorld(), *Body, *Holder, GrabbedWorldTransform))
+        {
+            // With support under the body, the last grip force estimates the player's share of the load.
+            const double SupportedLoadRatio = FMath::Max(0.0, Grip.AppliedForce.Z) / HolderDrive.MaxForce;
+            const double SupportedYawScale = 1.0 - FMath::SmoothStep(0.85, 1.15, SupportedLoadRatio);
+            YawOrientScale = FMath::Max(YawOrientScale, FMath::Min(SupportedYawScale, MaxSupportedYawScale));
+        }
         const double YawAlignVelZ = Carry::UpdateGripYaw(Grip, Target, Drive.Follow, HolderCount == 1,
-            GrabbedWorldTransform.GetRotation(), HolderDrive.AngularOrientScale, PlayerCarry, PlayerSettings);
+            GrabbedWorldTransform.GetRotation(), YawOrientScale, PlayerCarry, PlayerSettings);
+        Grip.MaxForce = HolderDrive.MaxForce;
+        Grip.MaxTorque = HolderDrive.AngularTorqueCapChaos;
+        Grip.YawAlignVelZ = YawAlignVelZ;
+        Grip.AngularOrientScale = YawOrientScale;
 
         const FVector BodyContact = BodyTransform.TransformPosition(Grip.LocalPoint);
         const FQuat TargetYawQuat = FRotator(0.0, Target.YawDegrees, 0.0).Quaternion();
@@ -300,8 +352,13 @@ void UCarryPhysicsComponent::TickComponent(float DeltaTime, ELevelTick TickType,
         // Initial grab frame before solver scatter (or non-authority client display): analytical spring-damper estimate.
         const FVector Error = (Grip.SmoothedTarget - BodyContact).GetClampedToMaxSize(HolderDrive.FullForceExtension);
         const FVector PointVelocity = Body->GetPhysicsLinearVelocityAtPoint(BodyContact);
-        const FVector ForceEstimate = Drive.LinearStiffnessChaos * Error + Drive.LinearDampingChaos * (Target.Velocity - PointVelocity);
+        FVector ForceEstimate = Drive.LinearStiffnessChaos * Error + Drive.LinearDampingChaos * (Target.Velocity - PointVelocity);
+        ForceEstimate.Z = FMath::Clamp(ForceEstimate.Z, -HolderDrive.MaxVerticalForce, HolderDrive.MaxVerticalForce);
         Grip.AppliedForce = ForceEstimate.GetClampedToMaxSize(HolderDrive.MaxForce);
+        const FVector BodyAngVel = Body->GetPhysicsAngularVelocityInRadians();
+        const FVector TargetAngVel(0.0, 0.0, YawAlignVelZ);
+        const FVector TorqueEstimate = Drive.AngularDampingChaos * (TargetAngVel - BodyAngVel);
+        Grip.AppliedTorque = TorqueEstimate.GetClampedToMaxSize(HolderDrive.AngularTorqueCapChaos);
     }
 
     if (bHasAuthority && ActiveHolders > 0)

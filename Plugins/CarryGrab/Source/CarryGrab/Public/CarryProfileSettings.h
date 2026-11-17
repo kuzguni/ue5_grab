@@ -43,6 +43,9 @@ struct CARRYGRAB_API FCarryPlayerSettings
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effort", meta = (ClampMin = "0", ToolTip = "Maximum pull this player can supply to one grip, in newtons. Other holders have their own limits."))
     float MaxForceNewtons = 700.0f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effort", meta = (ClampMin = "0", ToolTip = "Maximum vertical grip force this player can supply, in newtons. The general pull limit also applies. Holders contribute independently."))
+    float MaxLiftForceNewtons = 500.0f;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effort", meta = (ClampMin = "0", ToolTip = "Maximum twist this player can supply to stabilize one grip, in newton-meters. Set to zero to disable this player's angular drive."))
     float MaxTorqueNewtonMeters = 80.0f;
 };

@@ -144,7 +144,7 @@ void UCarryableComponent::OnRep_Grips()
     {
         Body->WakeAllRigidBodies();
     }
-    SetComponentTickEnabled((bShowGripMarkers || bShowBentReachPreview) && bIsHeld && GetNetMode() != NM_DedicatedServer);
+    SetComponentTickEnabled((bShowGripMarkers || bShowItemDebug || bShowBentReachPreview) && bIsHeld && GetNetMode() != NM_DedicatedServer);
     if (UCarryCollisionComponent* Collision = CachedCollision ? CachedCollision.Get() : (GetOwner() ? GetOwner()->FindComponentByClass<UCarryCollisionComponent>() : nullptr))
     {
         Collision->UpdateHolders(Grips);
@@ -162,6 +162,18 @@ void UCarryableComponent::OnRep_Grips()
     }
 }
 
+#if WITH_EDITOR
+void UCarryableComponent::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+    Super::PostEditChangeProperty(PropertyChangedEvent);
+    if (const UWorld* World = GetWorld(); World && World->IsGameWorld())
+    {
+        SetComponentTickEnabled((bShowGripMarkers || bShowItemDebug || bShowBentReachPreview)
+            && !Grips.IsEmpty() && GetNetMode() != NM_DedicatedServer);
+    }
+}
+#endif
+
 void UCarryableComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
@@ -174,8 +186,10 @@ void UCarryableComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
     }
 
     const FTransform& BodyTransform = Body->GetComponentTransform();
-    for (const FCarryGrip& Grip : Grips)
+    const int32 GripCount = Grips.Num();
+    for (int32 GripIndex = 0; GripIndex < GripCount; ++GripIndex)
     {
+        const FCarryGrip& Grip = Grips[GripIndex];
         const FVector Contact = BodyTransform.TransformPosition(Grip.LocalPoint);
         const FVector Normal = BodyTransform.TransformVectorNoScale(Grip.LocalNormal).GetSafeNormal();
 #if ENABLE_DRAW_DEBUG
@@ -185,11 +199,17 @@ void UCarryableComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
             CarryDebug::DrawBentReachPath(*World, Reach, Contact);
         }
 #endif
-        if (!bShowGripMarkers)
+        if (bShowGripMarkers)
         {
-            continue;
+            CarryDebug::DrawGripMarkers(*World, *Body, Grip, GripIndex, Contact, Normal, GripCount);
         }
-        CarryDebug::DrawGripMarkers(*World, Grip, Contact, Normal);
+    }
 
+    if (bShowItemDebug && GripCount > 0)
+    {
+        if (const AActor* Owner = GetOwner())
+        {
+            CarryDebug::DrawItemDebug(*World, *Owner, *Body, Grips, GetEffectiveMaxHolders());
+        }
     }
 }

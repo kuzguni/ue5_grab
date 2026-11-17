@@ -170,6 +170,7 @@ bool UCarryPhysicsComponent::UpdateGripConstraintDrive(FActiveGripConstraint& Ac
     const FTransform& GrabbedWorldTransform, const FVector& BodyLocation, const FVector& BodyContact,
     const FTransform& KinematicTarget, double YawAlignVelZ)
 {
+    const double VerticalForceCap = HolderDrive.MaxVerticalForce;
     const FQuat ConnectorWorldRot = GrabbedWorldTransform.GetRotation() * ActiveConstraint.GrabbedLocalFrame.GetRotation();
     const FMatrix ConnectorAxesMatrix = ConnectorWorldRot.ToMatrix();
     FVector AxisMaxForce(HolderDrive.PerHorizCap, HolderDrive.PerHorizCap, HolderDrive.MaxForce);
@@ -180,14 +181,22 @@ bool UCarryPhysicsComponent::UpdateGripConstraintDrive(FActiveGripConstraint& Ac
         const double HorizSq = AxisW.X * AxisW.X + AxisW.Y * AxisW.Y;
         const double VertSq = AxisW.Z * AxisW.Z;
         const double InvCapSq = HorizSq / FMath::Square(FMath::Max(HolderDrive.PerHorizCap, 1.0))
-            + VertSq / FMath::Square(FMath::Max(HolderDrive.MaxForce, 1.0));
+            + VertSq / FMath::Square(FMath::Max(VerticalForceCap, 1.0));
         const double Cap = InvCapSq > UE_SMALL_NUMBER ? 1.0 / FMath::Sqrt(InvCapSq) : HolderDrive.MaxForce;
         AxisMaxForce[AxisIdx] = Cap;
         SumVertCap += FMath::Abs(AxisW.Z) * Cap;
     }
-    if (SumVertCap > HolderDrive.MaxForce && SumVertCap > UE_SMALL_NUMBER)
+    if (SumVertCap > VerticalForceCap && SumVertCap > UE_SMALL_NUMBER)
     {
-        AxisMaxForce *= (HolderDrive.MaxForce / SumVertCap);
+        // Preserve axes perpendicular to world up when limiting the combined vertical projection.
+        for (int32 AxisIdx = 0; AxisIdx < 3; ++AxisIdx)
+        {
+            const FVector AxisW = ConnectorAxesMatrix.GetScaledAxis(static_cast<EAxis::Type>(EAxis::X + AxisIdx));
+            if (FMath::Abs(AxisW.Z) > UE_SMALL_NUMBER)
+            {
+                AxisMaxForce[AxisIdx] *= VerticalForceCap / SumVertCap;
+            }
+        }
     }
 
     if (Grip.RegripTime >= 0.0)
@@ -244,9 +253,11 @@ bool UCarryPhysicsComponent::UpdateGripConstraintDrive(FActiveGripConstraint& Ac
     FVector RawAngImpulse = FVector::ZeroVector;
     FPhysicsInterface::GetForce(ActiveConstraint.ConstraintHandle, RawLinImpulse, RawAngImpulse);
     const FVector SolverForce = -RawLinImpulse / Drive.StepDt;
-    if (SolverForce.SizeSquared() > 1.0)
+    const FVector SolverTorque = -RawAngImpulse / Drive.StepDt;
+    if (SolverForce.SizeSquared() > 1.0 || SolverTorque.SizeSquared() > 1.0)
     {
         Grip.AppliedForce = SolverForce.GetClampedToMaxSize(HolderDrive.MaxForce);
+        Grip.AppliedTorque = SolverTorque.GetClampedToMaxSize(HolderDrive.AngularTorqueCapChaos);
         return true;
     }
     return false;
