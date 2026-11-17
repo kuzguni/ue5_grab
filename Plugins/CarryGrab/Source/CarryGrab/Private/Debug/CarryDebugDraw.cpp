@@ -44,6 +44,9 @@ namespace CarryDebug
         }
         DrawDebugPoint(&World, Reach.CanReach() ? Contact : Reach.End, 8.0f,
             Reach.CanReach() ? FColor::Green : FColor::Red, false, -1.0f);
+        DrawDebugString(&World, Contact + FVector::UpVector * 50.0,
+            TEXT("Reach Sweeps\nBlue: Sweep 1 | Magenta: Sweep 2\nRed: Blocked"),
+            nullptr, FColor::White, 0.0f, true, 1.15f);
     }
 #endif
 
@@ -81,10 +84,14 @@ namespace CarryDebug
             DrawDebugDirectionalArrow(&World, Contact, Contact + ForceDir * ArrowLength, 16.0f, ForceColor, false, -1.0f, 0, 2.5f);
         }
 
-        // 4. Readout label: ID, Force magnitude (N), 3D Force vector, and unit direction
+        // Keep the legend together so it stays readable when the arrows overlap.
         const FVector LabelPos = Center + FVector::UpVector * (MarkerRadius + 10.0f);
         const FString LabelText = FString::Printf(
-            TEXT("ID %d | %.1f N [%.0f, %.0f, %.0f]\nDir (%.2f, %.2f, %.2f)"),
+            TEXT("Grip ID %d\n")
+            TEXT("Green: Grab Normal\n")
+            TEXT("Cyan: Target Error\n")
+            TEXT("Yellow to Red: Grip Force %.1f N [%.0f, %.0f, %.0f]\n")
+            TEXT("Force Dir (%.2f, %.2f, %.2f)"),
             Grip.PlayerId,
             ForceMagN,
             ForceNewtons.X, ForceNewtons.Y, ForceNewtons.Z,

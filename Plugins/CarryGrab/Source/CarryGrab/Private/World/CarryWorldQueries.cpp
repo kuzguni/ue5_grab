@@ -104,7 +104,7 @@ namespace CarryWorld
     }
 
     FHeavyApproachHit SweepHeavyApproach(UWorld& World, const AActor* ItemOwner, UPrimitiveComponent& Body,
-        const TArray<FCarryGrip>& Grips, const FVector& Direction, double Distance, double Mass, double MinMassRatio)
+        const TArray<FCarryGrip>& Grips, const FVector& Direction, double Distance, double Mass, double MinApproachMassRatio)
     {
         FComponentQueryParams Query(SCENE_QUERY_STAT(CarryHeavyApproach), ItemOwner);
         Query.bFindInitialOverlaps = false;
@@ -126,7 +126,7 @@ namespace CarryWorld
             }
 
             const double OtherMass = Other->GetMass();
-            if (OtherMass <= Mass * MinMassRatio || !Other->GetOwner()->FindComponentByClass<UCarryableComponent>())
+            if (OtherMass <= Mass * MinApproachMassRatio || !Other->GetOwner()->FindComponentByClass<UCarryableComponent>())
             {
                 continue;
             }

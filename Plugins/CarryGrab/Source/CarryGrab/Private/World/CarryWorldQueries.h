@@ -46,6 +46,6 @@ namespace CarryWorld
         const FVector& ReachStart, const FVector& Contact, const FCarryPlayerSettings& Settings, double MinGripChange,
         FHitResult& Hit);
     FHeavyApproachHit SweepHeavyApproach(UWorld& World, const AActor* ItemOwner, UPrimitiveComponent& Body,
-        const TArray<FCarryGrip>& Grips, const FVector& Direction, double Distance, double Mass, double MinMassRatio);
+        const TArray<FCarryGrip>& Grips, const FVector& Direction, double Distance, double Mass, double MinApproachMassRatio);
     bool OverlapsHolder(UPrimitiveComponent& ItemBody, UPrimitiveComponent& HolderBody);
 }
