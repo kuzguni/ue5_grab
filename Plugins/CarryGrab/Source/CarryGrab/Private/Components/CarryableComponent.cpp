@@ -18,6 +18,41 @@
 
 namespace
 {
+    UPrimitiveComponent* ResolveCarryBodyComponent(const AActor* Owner, FName BodyComponentName)
+    {
+        if (!Owner)
+        {
+            return nullptr;
+        }
+        if (BodyComponentName != NAME_None)
+        {
+            for (UActorComponent* Comp : Owner->GetComponents())
+            {
+                if (Comp && Comp->GetFName() == BodyComponentName)
+                {
+                    if (UPrimitiveComponent* Prim = Cast<UPrimitiveComponent>(Comp))
+                    {
+                        return Prim;
+                    }
+                }
+            }
+        }
+        UPrimitiveComponent* RootPrim = Cast<UPrimitiveComponent>(Owner->GetRootComponent());
+        if (RootPrim && (RootPrim->IsSimulatingPhysics() || RootPrim->BodyInstance.bSimulatePhysics))
+        {
+            return RootPrim;
+        }
+        for (UActorComponent* Comp : Owner->GetComponents())
+        {
+            UPrimitiveComponent* Prim = Cast<UPrimitiveComponent>(Comp);
+            if (Prim && Prim != RootPrim && (Prim->IsSimulatingPhysics() || Prim->BodyInstance.bSimulatePhysics))
+            {
+                return Prim;
+            }
+        }
+        return RootPrim;
+    }
+
     void ApplyPredictiveInterpolationCVars()
     {
         static bool bCVarsApplied = false;
@@ -89,7 +124,7 @@ void UCarryableComponent::BeginPlay()
     ApplyPredictiveInterpolationCVars();
     if (AActor* Owner = GetOwner())
     {
-        CachedBody = Cast<UPrimitiveComponent>(Owner->GetRootComponent());
+        CachedBody = ResolveCarryBodyComponent(Owner, BodyComponentName);
         CachedPhysics = Owner->FindComponentByClass<UCarryPhysicsComponent>();
         CachedCollision = Owner->FindComponentByClass<UCarryCollisionComponent>();
         Owner->SetPhysicsReplicationMode(EPhysicsReplicationMode::PredictiveInterpolation);
@@ -121,17 +156,18 @@ void UCarryableComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& 
 
 UPrimitiveComponent* UCarryableComponent::GetBodyComponent() const
 {
-    if (CachedBody)
+    if (CachedBody && (CachedBody->IsSimulatingPhysics() || CachedBody->BodyInstance.bSimulatePhysics))
     {
         return CachedBody.Get();
     }
-    const AActor* Owner = GetOwner();
-    return Owner ? Cast<UPrimitiveComponent>(Owner->GetRootComponent()) : nullptr;
+    return ResolveCarryBodyComponent(GetOwner(), BodyComponentName);
 }
 
 void UCarryableComponent::OnRep_Grips()
 {
     const bool bIsHeld = !Grips.IsEmpty();
+    const bool bHeldChanged = (bIsHeld != bWasHeld);
+    bWasHeld = bIsHeld;
     if (AActor* Owner = GetOwner())
     {
         Owner->SetNetUpdateFrequency(Carry::NetUpdateFrequencyHz);
@@ -158,6 +194,17 @@ void UCarryableComponent::OnRep_Grips()
         if (AActor* Owner = GetOwner())
         {
             Owner->SetMinNetUpdateFrequency(Carry::SettledNetUpdateFrequencyHz);
+        }
+    }
+    if (bHeldChanged)
+    {
+        if (bIsHeld)
+        {
+            OnItemGrabbed.Broadcast(this);
+        }
+        else
+        {
+            OnItemReleased.Broadcast(this);
         }
     }
 }

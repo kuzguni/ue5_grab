@@ -12,6 +12,8 @@ class UPrimitiveComponent;
 class UPrimaryDataAsset;
 struct FCarryItemSettings;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FCarryableHoldStateSignature, UCarryableComponent*, Item);
+
 USTRUCT()
 struct FCarryGrip
 {
@@ -89,12 +91,27 @@ public:
     UFUNCTION(BlueprintPure, Category = "Carry")
     int32 GetGripCount() const { return Grips.Num(); }
 
+    UFUNCTION(BlueprintPure, Category = "Carry")
+    bool IsHeld() const { return !Grips.IsEmpty(); }
+
     /** Effective limit after applying this item's instance override and profile. */
     UFUNCTION(BlueprintPure, Category = "Carry")
     int32 GetEffectiveMaxHolders() const;
 
     UFUNCTION(BlueprintPure, Category = "Carry")
     TArray<int32> GetGripPlayerIds() const;
+
+    /** Returns the simulating primitive component driven by this carryable item. */
+    UFUNCTION(BlueprintPure, Category = "Carry")
+    UPrimitiveComponent* GetBodyComponent() const;
+
+    /** Broadcast on server and clients when this item transitions from unheld (0 grips) to held (>0 grips). */
+    UPROPERTY(BlueprintAssignable, Category = "Carry")
+    FCarryableHoldStateSignature OnItemGrabbed;
+
+    /** Broadcast on server and clients when this item transitions from held (>0 grips) to unheld (0 grips). */
+    UPROPERTY(BlueprintAssignable, Category = "Carry")
+    FCarryableHoldStateSignature OnItemReleased;
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 #if WITH_EDITOR
@@ -120,7 +137,6 @@ private:
     bool HasGripFor(const APawn& Holder) const;
     bool TryGetGripWorldPoint(const APawn& Holder, FVector& OutPoint) const;
     void RemoveInvalidGrips();
-    UPrimitiveComponent* GetBodyComponent() const;
 
     UFUNCTION()
     void OnRep_Grips();
@@ -131,6 +147,10 @@ private:
     /** Assign this item's Blueprint profile in the level or Construction Script. Body overrides apply at Begin Play. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Carry|Profile", meta = (AllowPrivateAccess = "true"))
     TObjectPtr<UPrimaryDataAsset> ItemProfile;
+
+    /** Optional name of the simulating primitive component to grab when the root is a static base. Leave None to use the root component (or auto-detect a simulating child). */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Carry|Profile", meta = (AllowPrivateAccess = "true"))
+    FName BodyComponentName = NAME_None;
 
     /** This item's holder limit. Use 0 to inherit the profile, or the fallback if no profile is assigned. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Carry|Profile", meta = (AllowPrivateAccess = "true", ClampMin = "0", ClampMax = "4"))
@@ -159,4 +179,6 @@ private:
 
     UPROPERTY(Transient)
     TObjectPtr<UCarryCollisionComponent> CachedCollision = nullptr;
+
+    bool bWasHeld = false;
 };

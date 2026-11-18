@@ -19,6 +19,7 @@ struct UCarryPhysicsComponent::FBodyDrive
     double LoadedTurnScale;
     double TurnLoadAlpha;
     double GyrationRadiusCm;
+    double MinimumFollowScale;
 };
 
 struct UCarryPhysicsComponent::FHolderDrive
@@ -31,4 +32,5 @@ struct UCarryPhysicsComponent::FHolderDrive
     double AngularOrientScale;
     double AngularTorqueCapChaos;
     double PerHorizCap;
+    double DistanceFollowScale;
 };

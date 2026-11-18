@@ -67,7 +67,7 @@ UCarryPhysicsComponent::FBodyDrive UCarryPhysicsComponent::CalculateBodyDrive(co
         * FMath::Lerp(1.0, CompactDamping, CompactAlpha);
     return { Follow, StepDt, MassPerHolder, GravityZ, AvgInertia, DriveDampingRatio, LinearStiffnessChaos,
         LinearDampingChaos, AngularDampingChaos, AccelerationCap, TurnFraction, LoadedTurnScale, TurnLoadAlpha,
-        GyrationRadiusCm };
+        GyrationRadiusCm, FMath::Min(1.0, static_cast<double>(Settings ? Settings->MinimumHeavyFollowScale : MinimumHeavyFollowScale)) };
 }
 
 UCarryPhysicsComponent::FHolderDrive UCarryPhysicsComponent::CalculateHolderDrive(const FBodyDrive& Drive,
@@ -84,6 +84,9 @@ UCarryPhysicsComponent::FHolderDrive UCarryPhysicsComponent::CalculateHolderDriv
     const double AngularTorqueCapChaos = FMath::Min(FMath::Max(0.0, TorqueNm) * FMath::Square(Carry::CentimetersPerMeter), 0.5 * MaxForce * Drive.GyrationRadiusCm);
     const double RemainingHorizSq = FMath::Max(0.0, FMath::Square(MaxForce) - FMath::Square(GravitySupportForce));
     const double PerHorizCap = FMath::Max(0.45 * MaxForce, FMath::Sqrt(RemainingHorizSq)) / UE_SQRT_2;
+    // Scroll easing follows this holder's lift capacity relative to its share of the weight.
+    const double LiftRatio = MaxVerticalForce / FMath::Max(-Drive.MassPerHolder * Drive.GravityZ, 1.0);
+    const double DistanceFollowScale = FMath::Clamp(LiftRatio / 10.0, Drive.MinimumFollowScale, 1.0);
     return { PerHolderGravityHold, MaxForce, MaxVerticalForce, FullForceExtension, TurningAcceleration, AngularOrientScale,
-        AngularTorqueCapChaos, PerHorizCap };
+        AngularTorqueCapChaos, PerHorizCap, DistanceFollowScale };
 }

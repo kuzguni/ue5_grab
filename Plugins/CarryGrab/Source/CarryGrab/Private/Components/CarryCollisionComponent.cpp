@@ -16,10 +16,24 @@ UCarryCollisionComponent::UCarryCollisionComponent()
 void UCarryCollisionComponent::BeginPlay()
 {
     Super::BeginPlay();
+    CachedItemBody = GetItemBody();
+}
+
+UPrimitiveComponent* UCarryCollisionComponent::GetItemBody() const
+{
+    if (CachedItemBody && (CachedItemBody->IsSimulatingPhysics() || CachedItemBody->BodyInstance.bSimulatePhysics))
+    {
+        return CachedItemBody.Get();
+    }
     if (const AActor* Owner = GetOwner())
     {
-        CachedItemBody = Cast<UPrimitiveComponent>(Owner->GetRootComponent());
+        if (const UCarryableComponent* Carryable = Owner->FindComponentByClass<UCarryableComponent>())
+        {
+            return Carryable->GetBodyComponent();
+        }
+        return Cast<UPrimitiveComponent>(Owner->GetRootComponent());
     }
+    return nullptr;
 }
 
 bool UCarryCollisionComponent::IsHolderCollisionIgnored(APawn* Holder) const
@@ -64,7 +78,7 @@ void UCarryCollisionComponent::UpdateHolders(const TArray<FCarryGrip>& Grips)
 bool UCarryCollisionComponent::IgnoreHolder(APawn& Holder, FHolderCollision& Pair)
 {
     AActor* Item = GetOwner();
-    UPrimitiveComponent* ItemBody = CachedItemBody ? CachedItemBody.Get() : (Item ? Cast<UPrimitiveComponent>(Item->GetRootComponent()) : nullptr);
+    UPrimitiveComponent* ItemBody = GetItemBody();
     UPrimitiveComponent* HolderBody = Cast<UPrimitiveComponent>(Holder.GetRootComponent());
     if (!ItemBody || !HolderBody || !ItemBody->IsPhysicsStateCreated() || !HolderBody->IsPhysicsStateCreated())
     {
@@ -72,7 +86,7 @@ bool UCarryCollisionComponent::IgnoreHolder(APawn& Holder, FHolderCollision& Pai
     }
 
     // A free Chaos constraint supplies a pair filter without driving or limiting motion.
-    // Character movement sweeps also need their own per-actor ignore.
+    // Character movement sweeps also need their own per-actor or per-component ignore.
     UPhysicsConstraintComponent* Constraint = NewObject<UPhysicsConstraintComponent>(Item, NAME_None, RF_Transient);
     Constraint->SetLinearXLimit(LCM_Free, 0.0f);
     Constraint->SetLinearYLimit(LCM_Free, 0.0f);
@@ -91,10 +105,18 @@ bool UCarryCollisionComponent::IgnoreHolder(APawn& Holder, FHolderCollision& Pai
     }
 
     Pair.Constraint = Constraint;
-    Pair.bAddedMoveIgnore = !HolderBody->GetMoveIgnoreActors().Contains(Item);
-    if (Pair.bAddedMoveIgnore)
+    if (ItemBody == Item->GetRootComponent())
     {
-        HolderBody->IgnoreActorWhenMoving(Item, true);
+        Pair.bAddedMoveIgnore = !HolderBody->GetMoveIgnoreActors().Contains(Item);
+        if (Pair.bAddedMoveIgnore)
+        {
+            HolderBody->IgnoreActorWhenMoving(Item, true);
+        }
+    }
+    else if (!HolderBody->GetMoveIgnoreComponents().Contains(ItemBody))
+    {
+        HolderBody->IgnoreComponentWhenMoving(ItemBody, true);
+        Pair.IgnoredComponent = ItemBody;
     }
     return true;
 }
@@ -105,18 +127,25 @@ void UCarryCollisionComponent::RestoreHolder(APawn* Holder, const FHolderCollisi
     {
         Constraint->DestroyComponent();
     }
-    if (IsValid(Holder) && Pair.bAddedMoveIgnore)
+    if (IsValid(Holder))
     {
         if (UPrimitiveComponent* HolderBody = Cast<UPrimitiveComponent>(Holder->GetRootComponent()))
         {
-            HolderBody->IgnoreActorWhenMoving(GetOwner(), false);
+            if (Pair.bAddedMoveIgnore)
+            {
+                HolderBody->IgnoreActorWhenMoving(GetOwner(), false);
+            }
+            if (Pair.IgnoredComponent.IsValid())
+            {
+                HolderBody->IgnoreComponentWhenMoving(Pair.IgnoredComponent.Get(), false);
+            }
         }
     }
 }
 
 void UCarryCollisionComponent::RestoreSeparatedHolders()
 {
-    UPrimitiveComponent* ItemBody = CachedItemBody ? CachedItemBody.Get() : (GetOwner() ? Cast<UPrimitiveComponent>(GetOwner()->GetRootComponent()) : nullptr);
+    UPrimitiveComponent* ItemBody = GetItemBody();
     bool bWaitingForSeparation = false;
     for (auto It = Pairs.CreateIterator(); It; ++It)
     {

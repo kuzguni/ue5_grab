@@ -39,7 +39,7 @@ namespace Carry
 
     FGripTarget UpdateGripTarget(FCarryGrip& Grip, const APawn& Holder, const FTransform& ViewTransform,
         const FQuat& BodyRotation, float HoldDistanceFollowRate, const FTargetFollow& Follow,
-        double TurningAcceleration)
+        double TurningAcceleration, double DistanceFollowScale)
     {
         const FVector AimDirection = ViewTransform.TransformVectorNoScale(
             Grip.ViewLocalTarget.GetSafeNormal(UE_SMALL_NUMBER, FVector::ForwardVector));
@@ -76,7 +76,7 @@ namespace Carry
         const bool bRawViewChanged = Holder.IsLocallyControlled() || LocDeltaSq > 1e-4 || RotDelta > 1e-5;
 
         const double DistanceRate = FMath::Max(1.0, static_cast<double>(HoldDistanceFollowRate));
-        const double DistanceAlpha = 1.0 - FMath::Exp(-DistanceRate * Follow.FollowScale * Follow.StepDt);
+        const double DistanceAlpha = 1.0 - FMath::Exp(-DistanceRate * DistanceFollowScale * Follow.StepDt);
         Grip.SmoothedHoldDistance = FMath::Lerp(Grip.SmoothedHoldDistance, DesiredHoldDistance, DistanceAlpha);
         const FVector ViewOffset = AimDirection * Grip.SmoothedHoldDistance;
         bool bHoldFastTurnState = false;

@@ -29,7 +29,7 @@ namespace Carry
 
     FGripTarget UpdateGripTarget(FCarryGrip& Grip, const APawn& Holder, const FTransform& ViewTransform,
         const FQuat& BodyRotation, float HoldDistanceFollowRate, const FTargetFollow& Follow,
-        double TurningAcceleration);
+        double TurningAcceleration, double DistanceFollowScale);
 
     double UpdateGripYaw(FCarryGrip& Grip, const FGripTarget& Target, const FTargetFollow& Follow, bool bSolo,
         const FQuat& BodyRotation, double AngularOrientScale, const UPlayerCarryComponent* PlayerCarry,

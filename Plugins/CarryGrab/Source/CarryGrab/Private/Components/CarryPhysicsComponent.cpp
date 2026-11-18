@@ -35,7 +35,7 @@ void UCarryPhysicsComponent::BeginPlay()
     if (const AActor* Owner = GetOwner())
     {
         CachedCarryable = Owner->FindComponentByClass<UCarryableComponent>();
-        CachedBody = Cast<UPrimitiveComponent>(Owner->GetRootComponent());
+        CachedBody = CachedCarryable ? CachedCarryable->GetBodyComponent() : Cast<UPrimitiveComponent>(Owner->GetRootComponent());
     }
 }
 
@@ -59,7 +59,10 @@ void UCarryPhysicsComponent::HandleGripsChanged()
     }
 
     UCarryableComponent* Item = CachedCarryable ? CachedCarryable.Get() : Owner->FindComponentByClass<UCarryableComponent>();
-    UPrimitiveComponent* Body = CachedBody ? CachedBody.Get() : Cast<UPrimitiveComponent>(Owner->GetRootComponent());
+    UPrimitiveComponent* Body = (CachedBody && CachedBody->IsSimulatingPhysics())
+        ? CachedBody.Get()
+        : (Item ? Item->GetBodyComponent() : Cast<UPrimitiveComponent>(Owner->GetRootComponent()));
+    CachedBody = Body;
 
     if (!Owner->HasAuthority())
     {
@@ -173,7 +176,10 @@ void UCarryPhysicsComponent::TickComponent(float DeltaTime, ELevelTick TickType,
     }
 
     UCarryableComponent* Item = CachedCarryable ? CachedCarryable.Get() : Owner->FindComponentByClass<UCarryableComponent>();
-    UPrimitiveComponent* Body = CachedBody ? CachedBody.Get() : Cast<UPrimitiveComponent>(Owner->GetRootComponent());
+    UPrimitiveComponent* Body = (CachedBody && CachedBody->IsSimulatingPhysics())
+        ? CachedBody.Get()
+        : (Item ? Item->GetBodyComponent() : Cast<UPrimitiveComponent>(Owner->GetRootComponent()));
+    CachedBody = Body;
     if (!Item || Item->Grips.IsEmpty())
     {
         TickReleasedBody(*Owner, Body, DeltaTime);
@@ -308,7 +314,7 @@ void UCarryPhysicsComponent::TickComponent(float DeltaTime, ELevelTick TickType,
         const FHolderDrive HolderDrive = CalculateHolderDrive(Drive, HolderCount == 1, ForceNewtons, LiftForceNewtons, TorqueNm);
 
         const Carry::FGripTarget Target = Carry::UpdateGripTarget(Grip, *Holder, GetCarryViewTransform(*Holder), GrabbedWorldTransform.GetRotation(),
-            PlayerSettings ? PlayerSettings->HoldDistanceFollowRate : 10.0f, Drive.Follow, HolderDrive.TurningAcceleration);
+            PlayerSettings ? PlayerSettings->HoldDistanceFollowRate : 10.0f, Drive.Follow, HolderDrive.TurningAcceleration, HolderDrive.DistanceFollowScale);
         constexpr double MaxSupportedYawScale = 0.65;
         double YawOrientScale = HolderDrive.AngularOrientScale;
         if (bHasAuthority && HolderCount == 1 && Grip.RotationInput != 0 && HolderDrive.AngularTorqueCapChaos > 0.0

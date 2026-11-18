@@ -32,10 +32,12 @@ private:
     struct FHolderCollision
     {
         TWeakObjectPtr<UPhysicsConstraintComponent> Constraint;
+        TWeakObjectPtr<UPrimitiveComponent> IgnoredComponent;
         bool bAddedMoveIgnore = false;
         bool bPendingRestore = false;
     };
 
+    UPrimitiveComponent* GetItemBody() const;
     void UpdateHolders(const TArray<FCarryGrip>& Grips);
     bool IgnoreHolder(APawn& Holder, FHolderCollision& Pair);
     void RestoreHolder(APawn* Holder, const FHolderCollision& Pair);
